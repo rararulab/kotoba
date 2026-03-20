@@ -13,9 +13,9 @@ use crate::{
 /// A voice entry for display.
 #[derive(Debug, Serialize)]
 pub struct VoiceInfo {
-    pub name: String,
+    pub name:    String,
     pub backend: String,
-    pub active: bool,
+    pub active:  bool,
 }
 
 fn models_dir() -> Result<PathBuf> {
@@ -53,9 +53,9 @@ pub async fn list(db: &Database) -> Result<()> {
     for (id, name) in &voicevox_speakers {
         let key = format!("voicevox:{id}");
         voices.push(VoiceInfo {
-            name: format!("{name} [{key}]"),
+            name:    format!("{name} [{key}]"),
             backend: "voicevox".to_string(),
-            active: current == key,
+            active:  current == key,
         });
     }
 
@@ -67,9 +67,9 @@ pub async fn list(db: &Database) -> Result<()> {
                 let dir_name = entry.file_name().to_string_lossy().to_string();
                 let key = format!("vits:{dir_name}");
                 voices.push(VoiceInfo {
-                    name: format!("{dir_name} [{key}]"),
+                    name:    format!("{dir_name} [{key}]"),
                     backend: "vits".to_string(),
-                    active: current == key,
+                    active:  current == key,
                 });
             }
         }
