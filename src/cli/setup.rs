@@ -20,22 +20,23 @@ fn voicevox_dir() -> Result<PathBuf> {
 }
 
 fn voicevox_download_url() -> String {
-    let os = if cfg!(target_os = "macos") {
-        "macos"
+    // macOS assets: voicevox_engine-macos-{arch}-{ver}.vvpp (no -cpu suffix)
+    // Linux/Windows: voicevox_engine-{os}-cpu-{ver}.vvpp (no arch, has -cpu)
+    let platform = if cfg!(target_os = "macos") {
+        let arch = if cfg!(target_arch = "aarch64") {
+            "arm64"
+        } else {
+            "x64"
+        };
+        format!("macos-{arch}")
     } else if cfg!(target_os = "linux") {
-        "linux"
+        "linux-cpu".to_owned()
     } else {
-        "windows"
-    };
-
-    let arch = if cfg!(target_arch = "aarch64") {
-        "arm64"
-    } else {
-        "x64"
+        "windows-cpu".to_owned()
     };
 
     format!(
-        "https://github.com/VOICEVOX/voicevox_engine/releases/download/{VOICEVOX_VERSION}/voicevox_engine-{os}-{arch}-cpu-{VOICEVOX_VERSION}.vv"
+        "https://github.com/VOICEVOX/voicevox_engine/releases/download/{VOICEVOX_VERSION}/voicevox_engine-{platform}-{VOICEVOX_VERSION}.vvpp"
     )
 }
 
@@ -90,7 +91,7 @@ async fn download_voicevox() -> Result<()> {
     std::fs::create_dir_all(tmp.parent().expect("parent dir")).context(error::IoSnafu)?;
     std::fs::write(&tmp, &bytes).context(error::IoSnafu)?;
 
-    // Extract .vv archive (zip format)
+    // Extract .vvpp archive (zip format)
     let file = std::fs::File::open(&tmp).context(error::IoSnafu)?;
     let mut archive = zip::ZipArchive::new(file).map_err(|e| {
         error::VoicevoxSnafu {
