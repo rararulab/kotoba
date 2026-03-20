@@ -5,9 +5,7 @@
 use std::path::Path;
 
 use ndarray::Array2;
-use ort::inputs;
-use ort::session::Session;
-use ort::value::TensorRef;
+use ort::{inputs, session::Session, value::TensorRef};
 use snafu::{ResultExt, Snafu};
 
 /// Errors that can occur during VITS inference.
