@@ -16,6 +16,12 @@ async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
     let cli = Cli::parse();
     let db = db::Database::open_default().await?;
 
+    // Commands that require an initialized database
+    let needs_init = !matches!(cli.command, Command::Init | Command::Setup);
+    if needs_init {
+        db.ensure_initialized().await?;
+    }
+
     match cli.command {
         Command::Init => {
             db.init().await?;

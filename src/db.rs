@@ -112,6 +112,21 @@ impl Database {
         self.store.pool()
     }
 
+    /// Check if the database has been initialized (tables exist).
+    pub async fn ensure_initialized(&self) -> Result<()> {
+        let exists: Option<(String,)> = sqlx::query_as(
+            "SELECT name FROM sqlite_master WHERE type='table' AND name='vocabulary'",
+        )
+        .fetch_optional(self.pool())
+        .await
+        .context(error::SqlxSnafu)?;
+
+        if exists.is_none() {
+            return Err(error::DatabaseNotInitializedSnafu.build());
+        }
+        Ok(())
+    }
+
     /// Create all tables and seed default profile values.
     pub async fn init(&self) -> Result<()> {
         sqlx::raw_sql(include_str!("schema.sql"))

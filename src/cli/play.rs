@@ -60,7 +60,7 @@ pub async fn play_word(db: &Database, word: &str) -> Result<PathBuf> {
 
     match config.backend.as_str() {
         "voicevox" => synthesize_voicevox(word, &config.speaker_id, &file).await?,
-        "vits" => synthesize_vits()?,
+        "vits" => synthesize_vits(&config.speaker_id)?,
         other => {
             return Err(error::VoicevoxSnafu {
                 message: format!("unknown voice backend: {other}"),
@@ -77,6 +77,19 @@ async fn synthesize_voicevox(word: &str, speaker_id: &str, out_path: &PathBuf) -
     let base_url =
         std::env::var("VOICEVOX_URL").unwrap_or_else(|_| "http://localhost:50021".to_string());
     let client = reqwest::Client::new();
+
+    // Verify VOICEVOX is reachable before attempting synthesis
+    if client
+        .get(format!("{base_url}/version"))
+        .send()
+        .await
+        .is_err()
+    {
+        return Err(error::VoicevoxNotRunningSnafu {
+            url: base_url.clone(),
+        }
+        .build());
+    }
 
     let query: serde_json::Value = client
         .post(format!("{base_url}/audio_query"))
@@ -104,9 +117,9 @@ async fn synthesize_voicevox(word: &str, speaker_id: &str, out_path: &PathBuf) -
 }
 
 /// Placeholder for VITS inference — will be implemented in Issue #12.
-fn synthesize_vits() -> Result<()> {
-    Err(error::VoicevoxSnafu {
-        message: "VITS inference not yet implemented".to_string(),
+fn synthesize_vits(model_name: &str) -> Result<()> {
+    Err(error::ModelNotFoundSnafu {
+        name: model_name.to_string(),
     }
     .build())
 }

@@ -37,6 +37,20 @@ pub enum KotobaError {
 
     #[snafu(display("unknown export format: {format} (use json, csv, or anki)"))]
     UnknownFormat { format: String },
+
+    #[snafu(display("database not initialized — run `kotoba init` first"))]
+    DatabaseNotInitialized,
+
+    #[snafu(display("VOICEVOX not installed — run `kotoba setup` to download it"))]
+    VoicevoxNotInstalled,
+
+    #[snafu(display(
+        "VOICEVOX not running at {url} — start it with `kotoba setup` or run VOICEVOX manually"
+    ))]
+    VoicevoxNotRunning { url: String },
+
+    #[snafu(display("voice model not found: {name} — download with `kotoba voice add <repo_id>`"))]
+    ModelNotFound { name: String },
 }
 
 pub type Result<T> = std::result::Result<T, KotobaError>;
