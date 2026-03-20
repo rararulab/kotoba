@@ -30,14 +30,14 @@ pub enum Command {
     /// Add a new vocabulary word
     Add {
         /// The word (kanji or kana)
-        word: String,
+        word:    String,
         /// Kana reading
         reading: String,
         /// Chinese meaning
         meaning: String,
         /// JLPT level
         #[arg(long, default_value = "N5")]
-        level: String,
+        level:   String,
     },
     /// Manage grammar patterns
     Grammar {
@@ -47,7 +47,7 @@ pub enum Command {
     /// Record that a word or grammar pattern was seen/reviewed
     Seen {
         /// The word
-        word: String,
+        word:    String,
         /// Quality: 1 (forgot), 3 (recognized), 5 (instant recall)
         quality: u8,
         /// Record review for a grammar pattern instead of vocabulary
@@ -121,7 +121,7 @@ pub enum ConfigAction {
     /// Set a config value
     Set {
         /// Config key (e.g. blending-intensity)
-        key: String,
+        key:   String,
         /// Config value
         value: String,
     },
