@@ -27,6 +27,10 @@ pub enum VitsError {
     /// Blocking task join error.
     #[snafu(display("join error: {source}"))]
     Join { source: tokio::task::JoinError },
+
+    /// Home directory could not be determined.
+    #[snafu(display("home directory not found"))]
+    HomeNotFound,
 }
 
 /// Module-level result type.
@@ -161,7 +165,7 @@ fn kana_to_ascii(text: &str) -> String {
 /// The inference runs inside `spawn_blocking` to avoid blocking the
 /// async runtime.
 pub async fn synthesize(model_name: &str, text: &str, output: &Path) -> Result<()> {
-    let home = dirs::home_dir().expect("home directory must exist");
+    let home = dirs::home_dir().ok_or_else(|| HomeNotFoundSnafu.build())?;
     let model_path = home
         .join(".kotoba")
         .join("models")
