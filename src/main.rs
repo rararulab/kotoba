@@ -145,12 +145,17 @@ async fn run() -> std::result::Result<(), Box<dyn std::error::Error>> {
                     serde_json::json!({"ok": true, "action": "voice_set", "name": name})
                 );
             }
-            cli::VoiceAction::Add { repo_id } => {
-                let result = cli::voice::add(&repo_id).await?;
+        },
+        Command::Huggingface { action } => match action {
+            cli::HuggingFaceAction::Add { repo_id } => {
+                let result = cli::huggingface::add(&repo_id).await?;
                 println!(
                     "{}",
-                    serde_json::json!({"ok": true, "action": "voice_add", "model": result.model, "path": result.path})
+                    serde_json::json!({"ok": true, "action": "huggingface_add", "model": result.model, "path": result.path})
                 );
+            }
+            cli::HuggingFaceAction::List => {
+                cli::huggingface::list()?;
             }
         },
         Command::Config { action } => match action {
