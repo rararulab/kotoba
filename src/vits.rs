@@ -309,6 +309,34 @@ mod tests {
     }
 
     #[test]
+    fn phoneme_ids_padding_structure() {
+        let ids = text_to_phoneme_ids("abc");
+        // BOS + a + pad + b + pad + c + EOS = 7
+        assert_eq!(ids.len(), 7);
+        assert_eq!(ids[0], 0, "BOS");
+        assert_eq!(ids[2], 0, "padding after a");
+        assert_eq!(ids[4], 0, "padding after b");
+        assert_eq!(ids[6], 0, "EOS");
+    }
+
+    #[test]
+    fn phoneme_ids_empty_input() {
+        let ids = text_to_phoneme_ids("");
+        // Only BOS + EOS
+        assert_eq!(ids.len(), 2);
+        assert_eq!(ids[0], 0);
+        assert_eq!(ids[1], 0);
+    }
+
+    #[test]
+    fn phoneme_ids_space_encoding() {
+        let ids = text_to_phoneme_ids(" ");
+        // BOS + space(1) + EOS
+        assert_eq!(ids.len(), 3);
+        assert_eq!(ids[1], 1, "space should map to 1");
+    }
+
+    #[test]
     fn write_wav_produces_valid_header() {
         let dir = std::env::temp_dir().join("kotoba_test_wav");
         std::fs::create_dir_all(&dir).expect("failed to create temp dir");
