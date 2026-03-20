@@ -2,8 +2,7 @@
 
 use sqlx::sqlite::SqlitePoolOptions;
 
-use super::db::DBStore;
-use super::err::Result;
+use super::{db::DBStore, err::Result};
 
 /// `SQLite` database configuration.
 #[derive(Debug, Clone, bon::Builder, serde::Serialize, serde::Deserialize)]
@@ -14,9 +13,7 @@ pub struct DatabaseConfig {
     pub max_connections: u32,
 }
 
-const fn default_max_connections() -> u32 {
-    5
-}
+const fn default_max_connections() -> u32 { 5 }
 
 impl DatabaseConfig {
     /// Open a `SQLite` database at the given URL.
@@ -34,9 +31,7 @@ impl DatabaseConfig {
         sqlx::query("PRAGMA busy_timeout=5000")
             .execute(&pool)
             .await?;
-        sqlx::query("PRAGMA foreign_keys=ON")
-            .execute(&pool)
-            .await?;
+        sqlx::query("PRAGMA foreign_keys=ON").execute(&pool).await?;
 
         Ok(DBStore::new(pool))
     }

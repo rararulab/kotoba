@@ -2,14 +2,12 @@
 
 use serde::Serialize;
 
-use crate::cli::setup;
-use crate::db::Database;
-use crate::error::Result;
+use crate::{cli::setup, db::Database, error::Result};
 
 /// Health check result for a single component.
 #[derive(Debug, Serialize)]
 pub struct Check {
-    pub name: String,
+    pub name:   String,
     pub status: String,
     pub detail: String,
 }
@@ -17,7 +15,7 @@ pub struct Check {
 /// Full doctor report.
 #[derive(Debug, Serialize)]
 pub struct Report {
-    pub checks: Vec<Check>,
+    pub checks:  Vec<Check>,
     pub healthy: bool,
 }
 
@@ -43,7 +41,10 @@ pub async fn run(db: &Database) -> Result<()> {
     let healthy = checks.iter().all(|c| c.status == "ok");
 
     let report = Report { checks, healthy };
-    println!("{}", serde_json::to_string_pretty(&report).expect("json serialize"));
+    println!(
+        "{}",
+        serde_json::to_string_pretty(&report).expect("json serialize")
+    );
 
     Ok(())
 }
@@ -51,7 +52,7 @@ pub async fn run(db: &Database) -> Result<()> {
 async fn check_database(db: &Database) -> Check {
     match db.status().await {
         Ok(status) => Check {
-            name: "database".to_string(),
+            name:   "database".to_string(),
             status: "ok".to_string(),
             detail: format!(
                 "level={}, vocab={}, due={}",
@@ -59,7 +60,7 @@ async fn check_database(db: &Database) -> Check {
             ),
         },
         Err(e) => Check {
-            name: "database".to_string(),
+            name:   "database".to_string(),
             status: "error".to_string(),
             detail: format!("not initialized or corrupt: {e}"),
         },
@@ -69,12 +70,13 @@ async fn check_database(db: &Database) -> Check {
 fn check_voicevox_installed() -> Check {
     match setup::is_voicevox_installed() {
         Ok(true) => Check {
-            name: "voicevox_installed".to_string(),
+            name:   "voicevox_installed".to_string(),
             status: "ok".to_string(),
-            detail: setup::voicevox_executable().map_or_else(|_| "unknown path".to_string(), |p| p.display().to_string()),
+            detail: setup::voicevox_executable()
+                .map_or_else(|_| "unknown path".to_string(), |p| p.display().to_string()),
         },
         _ => Check {
-            name: "voicevox_installed".to_string(),
+            name:   "voicevox_installed".to_string(),
             status: "missing".to_string(),
             detail: "run `kotoba setup` to install".to_string(),
         },
@@ -93,7 +95,7 @@ async fn check_voicevox_api() -> Check {
         Ok(c) => c,
         Err(e) => {
             return Check {
-                name: "voicevox_api".to_string(),
+                name:   "voicevox_api".to_string(),
                 status: "error".to_string(),
                 detail: format!("http client error: {e}"),
             };
@@ -104,18 +106,18 @@ async fn check_voicevox_api() -> Check {
         Ok(resp) if resp.status().is_success() => {
             let version = resp.text().await.unwrap_or_else(|_| "unknown".to_string());
             Check {
-                name: "voicevox_api".to_string(),
+                name:   "voicevox_api".to_string(),
                 status: "ok".to_string(),
                 detail: format!("version={version}, url={base_url}"),
             }
         }
         Ok(resp) => Check {
-            name: "voicevox_api".to_string(),
+            name:   "voicevox_api".to_string(),
             status: "error".to_string(),
             detail: format!("HTTP {}", resp.status()),
         },
         Err(_) => Check {
-            name: "voicevox_api".to_string(),
+            name:   "voicevox_api".to_string(),
             status: "not_running".to_string(),
             detail: format!("{base_url} unreachable — start VOICEVOX Engine first"),
         },
@@ -123,8 +125,7 @@ async fn check_voicevox_api() -> Check {
 }
 
 fn check_audio_cache() -> Check {
-    let dir = dirs::home_dir()
-        .map(|h| h.join(".kotoba").join("audio"));
+    let dir = dirs::home_dir().map(|h| h.join(".kotoba").join("audio"));
 
     match dir {
         Some(d) if d.exists() => {
@@ -132,18 +133,18 @@ fn check_audio_cache() -> Check {
                 .map(std::iter::Iterator::count)
                 .unwrap_or(0);
             Check {
-                name: "audio_cache".to_string(),
+                name:   "audio_cache".to_string(),
                 status: "ok".to_string(),
                 detail: format!("{} cached files at {}", count, d.display()),
             }
         }
         Some(d) => Check {
-            name: "audio_cache".to_string(),
+            name:   "audio_cache".to_string(),
             status: "ok".to_string(),
             detail: format!("not created yet (will be at {})", d.display()),
         },
         None => Check {
-            name: "audio_cache".to_string(),
+            name:   "audio_cache".to_string(),
             status: "error".to_string(),
             detail: "home directory not found".to_string(),
         },
@@ -154,14 +155,14 @@ fn check_disk_space() -> Check {
     let home = dirs::home_dir().map(|h| h.join(".kotoba"));
     home.map_or_else(
         || Check {
-            name: "disk_space".to_string(),
+            name:   "disk_space".to_string(),
             status: "error".to_string(),
             detail: "home directory not found".to_string(),
         },
         |p| {
             let path = p.display().to_string();
             Check {
-                name: "disk_space".to_string(),
+                name:   "disk_space".to_string(),
                 status: "ok".to_string(),
                 detail: format!("data dir: {path}"),
             }

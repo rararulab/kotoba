@@ -4,8 +4,10 @@ use std::path::PathBuf;
 
 use snafu::ResultExt;
 
-use crate::db::Database;
-use crate::error::{self, Result};
+use crate::{
+    db::Database,
+    error::{self, Result},
+};
 
 const VOICEVOX_VERSION: &str = "0.22.2";
 
@@ -44,9 +46,7 @@ pub fn is_voicevox_installed() -> Result<bool> {
 }
 
 /// Get the path to the VOICEVOX Engine executable.
-pub fn voicevox_executable() -> Result<PathBuf> {
-    Ok(voicevox_dir()?.join("run"))
-}
+pub fn voicevox_executable() -> Result<PathBuf> { Ok(voicevox_dir()?.join("run")) }
 
 /// Run full setup: download VOICEVOX Engine + initialize DB.
 pub async fn run(db: &Database) -> Result<()> {
@@ -75,11 +75,7 @@ async fn download_voicevox() -> Result<()> {
     println!("  url: {url}");
 
     let client = reqwest::Client::new();
-    let response = client
-        .get(&url)
-        .send()
-        .await
-        .context(error::HttpSnafu)?;
+    let response = client.get(&url).send().await.context(error::HttpSnafu)?;
 
     if !response.status().is_success() {
         return Err(error::VoicevoxSnafu {

@@ -5,52 +5,54 @@ use std::path::{Path, PathBuf};
 use serde::Serialize;
 use snafu::ResultExt;
 
-use crate::error::{self, Result};
-use crate::store::{DBStore, DatabaseConfig};
+use crate::{
+    error::{self, Result},
+    store::{DBStore, DatabaseConfig},
+};
 
 /// Application database wrapping the store layer.
 pub struct Database {
     store: DBStore,
-    path: PathBuf,
+    path:  PathBuf,
 }
 
 /// Current learning status returned by `kotoba status`.
 #[derive(Debug, Serialize, bon::Builder)]
 pub struct Status {
-    pub level: String,
+    pub level:            String,
     pub vocabulary_count: usize,
-    pub grammar_count: usize,
-    pub due_reviews: usize,
+    pub grammar_count:    usize,
+    pub due_reviews:      usize,
 }
 
 /// A vocabulary entry for display or export.
 #[derive(Debug, Serialize)]
 pub struct VocabularyItem {
-    pub word: String,
+    pub word:    String,
     pub reading: String,
     pub meaning: String,
-    pub level: String,
+    pub level:   String,
 }
 
 /// An item due for SRS review.
 #[derive(Debug, Serialize)]
 pub struct ReviewItem {
-    pub word: String,
-    pub reading: String,
-    pub meaning: String,
+    pub word:      String,
+    pub reading:   String,
+    pub meaning:   String,
     pub item_type: String,
-    pub due_at: String,
+    pub due_at:    String,
 }
 
 /// Learning progress statistics.
 #[derive(Debug, Serialize, bon::Builder)]
 pub struct Progress {
     pub total_vocabulary: usize,
-    pub total_grammar: usize,
-    pub mastered: usize,
-    pub learning: usize,
-    pub new: usize,
-    pub reviews_count: usize,
+    pub total_grammar:    usize,
+    pub mastered:         usize,
+    pub learning:         usize,
+    pub new:              usize,
+    pub reviews_count:    usize,
 }
 
 fn default_db_dir() -> Result<PathBuf> {
@@ -75,13 +77,9 @@ impl Database {
     }
 
     /// Return the database file path.
-    pub fn path(&self) -> &Path {
-        &self.path
-    }
+    pub fn path(&self) -> &Path { &self.path }
 
-    fn pool(&self) -> &sqlx::SqlitePool {
-        self.store.pool()
-    }
+    fn pool(&self) -> &sqlx::SqlitePool { self.store.pool() }
 
     /// Create all tables and seed default profile values.
     pub async fn init(&self) -> Result<()> {
@@ -94,7 +92,10 @@ impl Database {
 
     /// Return current learning status.
     pub async fn status(&self) -> Result<Status> {
-        let level = self.get_config("current_level").await?.unwrap_or("N5".to_string());
+        let level = self
+            .get_config("current_level")
+            .await?
+            .unwrap_or("N5".to_string());
         let vocabulary_count = self.count("vocabulary").await?;
         let grammar_count = self.count("grammar").await?;
         let due_reviews = self.due_vocabulary().await?.len() + self.due_grammar().await?.len();
@@ -116,8 +117,7 @@ impl Database {
         level: &str,
     ) -> Result<()> {
         sqlx::query(
-            "INSERT OR REPLACE INTO vocabulary (word, reading, meaning, level) \
-             VALUES (?, ?, ?, ?)",
+            "INSERT OR REPLACE INTO vocabulary (word, reading, meaning, level) VALUES (?, ?, ?, ?)",
         )
         .bind(word)
         .bind(reading)
@@ -131,12 +131,11 @@ impl Database {
 
     /// Look up a vocabulary item's database ID by word.
     pub async fn get_vocabulary_id(&self, word: &str) -> Result<i64> {
-        let row: Option<(i64,)> =
-            sqlx::query_as("SELECT id FROM vocabulary WHERE word = ?")
-                .bind(word)
-                .fetch_optional(self.pool())
-                .await
-                .context(error::SqlxSnafu)?;
+        let row: Option<(i64,)> = sqlx::query_as("SELECT id FROM vocabulary WHERE word = ?")
+            .bind(word)
+            .fetch_optional(self.pool())
+            .await
+            .context(error::SqlxSnafu)?;
 
         row.map(|(id,)| id).ok_or_else(|| {
             error::WordNotFoundSnafu {
@@ -153,8 +152,7 @@ impl Database {
         item_type: &str,
     ) -> Result<Option<(f64, f64, i32)>> {
         let row: Option<(f64, f64, i32)> = sqlx::query_as(
-            "SELECT interval_days, ease, reps FROM reviews \
-             WHERE item_id = ? AND item_type = ? \
+            "SELECT interval_days, ease, reps FROM reviews WHERE item_id = ? AND item_type = ? \
              ORDER BY reviewed_at DESC LIMIT 1",
         )
         .bind(item_id)
@@ -177,8 +175,8 @@ impl Database {
         reps: i32,
     ) -> Result<()> {
         sqlx::query(
-            "INSERT INTO reviews (item_id, item_type, quality, interval_days, ease, reps) \
-             VALUES (?, ?, ?, ?, ?, ?)",
+            "INSERT INTO reviews (item_id, item_type, quality, interval_days, ease, reps) VALUES \
+             (?, ?, ?, ?, ?, ?)",
         )
         .bind(item_id)
         .bind(item_type)
@@ -194,18 +192,17 @@ impl Database {
 
     /// Return vocabulary items due for review.
     pub async fn due_vocabulary(&self) -> Result<Vec<ReviewItem>> {
-        let now = chrono::Utc::now().naive_utc().format("%Y-%m-%d %H:%M:%S").to_string();
+        let now = chrono::Utc::now()
+            .naive_utc()
+            .format("%Y-%m-%d %H:%M:%S")
+            .to_string();
 
         let rows: Vec<(String, String, String, Option<String>, Option<f64>)> = sqlx::query_as(
-            "SELECT v.word, v.reading, v.meaning, r.reviewed_at, r.interval_days \
-             FROM vocabulary v \
-             LEFT JOIN ( \
-                 SELECT item_id, reviewed_at, interval_days, \
-                        ROW_NUMBER() OVER (PARTITION BY item_id ORDER BY reviewed_at DESC) as rn \
-                 FROM reviews WHERE item_type = 'vocabulary' \
-             ) r ON v.id = r.item_id AND r.rn = 1 \
-             WHERE r.reviewed_at IS NULL \
-                OR datetime(r.reviewed_at, '+' || CAST(r.interval_days AS INTEGER) || ' days') <= ?",
+            "SELECT v.word, v.reading, v.meaning, r.reviewed_at, r.interval_days FROM vocabulary \
+             v LEFT JOIN ( SELECT item_id, reviewed_at, interval_days, ROW_NUMBER() OVER \
+             (PARTITION BY item_id ORDER BY reviewed_at DESC) as rn FROM reviews WHERE item_type \
+             = 'vocabulary' ) r ON v.id = r.item_id AND r.rn = 1 WHERE r.reviewed_at IS NULL OR \
+             datetime(r.reviewed_at, '+' || CAST(r.interval_days AS INTEGER) || ' days') <= ?",
         )
         .bind(&now)
         .fetch_all(self.pool())
@@ -214,13 +211,15 @@ impl Database {
 
         let items = rows
             .into_iter()
-            .map(|(word, reading, meaning, reviewed_at, interval)| ReviewItem {
-                word,
-                reading,
-                meaning,
-                item_type: "vocabulary".to_string(),
-                due_at: format_due_at(reviewed_at.as_deref(), interval),
-            })
+            .map(
+                |(word, reading, meaning, reviewed_at, interval)| ReviewItem {
+                    word,
+                    reading,
+                    meaning,
+                    item_type: "vocabulary".to_string(),
+                    due_at: format_due_at(reviewed_at.as_deref(), interval),
+                },
+            )
             .collect();
 
         Ok(items)
@@ -228,18 +227,17 @@ impl Database {
 
     /// Return grammar items due for review.
     pub async fn due_grammar(&self) -> Result<Vec<ReviewItem>> {
-        let now = chrono::Utc::now().naive_utc().format("%Y-%m-%d %H:%M:%S").to_string();
+        let now = chrono::Utc::now()
+            .naive_utc()
+            .format("%Y-%m-%d %H:%M:%S")
+            .to_string();
 
         let rows: Vec<(String, String, Option<String>, Option<f64>)> = sqlx::query_as(
-            "SELECT g.pattern, g.meaning, r.reviewed_at, r.interval_days \
-             FROM grammar g \
-             LEFT JOIN ( \
-                 SELECT item_id, reviewed_at, interval_days, \
-                        ROW_NUMBER() OVER (PARTITION BY item_id ORDER BY reviewed_at DESC) as rn \
-                 FROM reviews WHERE item_type = 'grammar' \
-             ) r ON g.id = r.item_id AND r.rn = 1 \
-             WHERE r.reviewed_at IS NULL \
-                OR datetime(r.reviewed_at, '+' || CAST(r.interval_days AS INTEGER) || ' days') <= ?",
+            "SELECT g.pattern, g.meaning, r.reviewed_at, r.interval_days FROM grammar g LEFT JOIN \
+             ( SELECT item_id, reviewed_at, interval_days, ROW_NUMBER() OVER (PARTITION BY \
+             item_id ORDER BY reviewed_at DESC) as rn FROM reviews WHERE item_type = 'grammar' ) \
+             r ON g.id = r.item_id AND r.rn = 1 WHERE r.reviewed_at IS NULL OR \
+             datetime(r.reviewed_at, '+' || CAST(r.interval_days AS INTEGER) || ' days') <= ?",
         )
         .bind(&now)
         .fetch_all(self.pool())
@@ -267,11 +265,10 @@ impl Database {
         let mastered = self.count_by_mastery("reps >= 5").await?;
         let learning = self.count_by_mastery("reps < 5 AND reps > 0").await?;
 
-        let reviewed_items: (i64,) =
-            sqlx::query_as("SELECT COUNT(DISTINCT item_id) FROM reviews")
-                .fetch_one(self.pool())
-                .await
-                .context(error::SqlxSnafu)?;
+        let reviewed_items: (i64,) = sqlx::query_as("SELECT COUNT(DISTINCT item_id) FROM reviews")
+            .fetch_one(self.pool())
+            .await
+            .context(error::SqlxSnafu)?;
         let new = (total_vocabulary + total_grammar).saturating_sub(reviewed_items.0 as usize);
 
         let date_filter = if weekly {
@@ -297,11 +294,12 @@ impl Database {
 
     /// Return all vocabulary items for export.
     pub async fn all_vocabulary(&self) -> Result<Vec<VocabularyItem>> {
-        let rows: Vec<(String, String, String, String)> =
-            sqlx::query_as("SELECT word, reading, meaning, level FROM vocabulary ORDER BY created_at")
-                .fetch_all(self.pool())
-                .await
-                .context(error::SqlxSnafu)?;
+        let rows: Vec<(String, String, String, String)> = sqlx::query_as(
+            "SELECT word, reading, meaning, level FROM vocabulary ORDER BY created_at",
+        )
+        .fetch_all(self.pool())
+        .await
+        .context(error::SqlxSnafu)?;
 
         Ok(rows
             .into_iter()
@@ -327,12 +325,11 @@ impl Database {
 
     /// Get a user profile config value.
     pub async fn get_config(&self, key: &str) -> Result<Option<String>> {
-        let row: Option<(String,)> =
-            sqlx::query_as("SELECT value FROM user_profile WHERE key = ?")
-                .bind(key)
-                .fetch_optional(self.pool())
-                .await
-                .context(error::SqlxSnafu)?;
+        let row: Option<(String,)> = sqlx::query_as("SELECT value FROM user_profile WHERE key = ?")
+            .bind(key)
+            .fetch_optional(self.pool())
+            .await
+            .context(error::SqlxSnafu)?;
         Ok(row.map(|(v,)| v))
     }
 
@@ -346,10 +343,9 @@ impl Database {
 
     async fn count_by_mastery(&self, condition: &str) -> Result<usize> {
         let row: (i64,) = sqlx::query_as(&format!(
-            "SELECT COUNT(DISTINCT item_id) FROM reviews r1 \
-             WHERE {condition} \
-               AND reviewed_at = (SELECT MAX(reviewed_at) FROM reviews r2 \
-                                  WHERE r2.item_id = r1.item_id AND r2.item_type = r1.item_type)"
+            "SELECT COUNT(DISTINCT item_id) FROM reviews r1 WHERE {condition} AND reviewed_at = \
+             (SELECT MAX(reviewed_at) FROM reviews r2 WHERE r2.item_id = r1.item_id AND \
+             r2.item_type = r1.item_type)"
         ))
         .fetch_one(self.pool())
         .await

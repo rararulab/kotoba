@@ -7,8 +7,10 @@
 
 use snafu::ensure;
 
-use crate::db::Database;
-use crate::error::{self, Result};
+use crate::{
+    db::Database,
+    error::{self, Result},
+};
 
 /// Record a review for a vocabulary word and update SRS state.
 pub async fn record_review(db: &Database, word: &str, quality: u8) -> Result<()> {
@@ -39,12 +41,7 @@ const fn first_review(quality: u8) -> (f64, f64, i32) {
     }
 }
 
-fn next_review(
-    quality: u8,
-    prev_interval: f64,
-    prev_ease: f64,
-    prev_reps: i32,
-) -> (f64, f64, i32) {
+fn next_review(quality: u8, prev_interval: f64, prev_ease: f64, prev_reps: i32) -> (f64, f64, i32) {
     if quality < 3 {
         let ease = (prev_ease - 0.3).max(1.3);
         return (0.1, ease, 0);
@@ -103,7 +100,7 @@ mod tests {
 
     #[test]
     fn interval_capped_at_365() {
-        let (interval, _, _) = next_review(5, 300.0, 2.5, 10);
+        let (interval, ..) = next_review(5, 300.0, 2.5, 10);
         assert!(interval <= 365.0);
     }
 }
