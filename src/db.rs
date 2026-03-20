@@ -351,13 +351,27 @@ impl Database {
             .build())
     }
 
-    /// Return all vocabulary items for export.
-    pub async fn all_vocabulary(&self) -> Result<Vec<VocabularyItem>> {
-        let rows: Vec<(String, String, String, String, String)> = sqlx::query_as(
-            "SELECT word, reading, romaji, meaning, level FROM vocabulary ORDER BY created_at",
-        )
-        .fetch_all(self.pool())
-        .await
+    /// Return all vocabulary items, optionally filtered by JLPT level.
+    pub async fn all_vocabulary(&self, level: Option<&str>) -> Result<Vec<VocabularyItem>> {
+        let rows: Vec<(String, String, String, String, String)> = match level {
+            Some(lvl) => {
+                sqlx::query_as(
+                    "SELECT word, reading, romaji, meaning, level FROM vocabulary WHERE level = ? \
+                     ORDER BY created_at",
+                )
+                .bind(lvl)
+                .fetch_all(self.pool())
+                .await
+            }
+            None => {
+                sqlx::query_as(
+                    "SELECT word, reading, romaji, meaning, level FROM vocabulary ORDER BY \
+                     created_at",
+                )
+                .fetch_all(self.pool())
+                .await
+            }
+        }
         .context(error::SqlxSnafu)?;
 
         Ok(rows

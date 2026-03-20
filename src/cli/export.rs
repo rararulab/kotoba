@@ -7,6 +7,10 @@ use crate::{
     error::{self, Result},
 };
 
+/// Escape a field for RFC 4180 CSV output by wrapping in double quotes and
+/// doubling any internal quote characters.
+fn csv_field(s: &str) -> String { format!("\"{}\"", s.replace('"', "\"\"")) }
+
 /// Export vocabulary or grammar in the specified format to stdout.
 pub async fn export(db: &Database, format: &str, grammar: bool) -> Result<()> {
     ensure!(
@@ -22,7 +26,7 @@ pub async fn export(db: &Database, format: &str, grammar: bool) -> Result<()> {
 }
 
 async fn export_vocabulary(db: &Database, format: &str) -> Result<()> {
-    let vocab = db.all_vocabulary().await?;
+    let vocab = db.all_vocabulary(None).await?;
 
     match format {
         "json" => {
@@ -34,7 +38,11 @@ async fn export_vocabulary(db: &Database, format: &str) -> Result<()> {
             for v in &vocab {
                 println!(
                     "{},{},{},{},{}",
-                    v.word, v.reading, v.romaji, v.meaning, v.level
+                    csv_field(&v.word),
+                    csv_field(&v.reading),
+                    csv_field(&v.romaji),
+                    csv_field(&v.meaning),
+                    csv_field(&v.level),
                 );
             }
         }
@@ -62,10 +70,10 @@ async fn export_grammar(db: &Database, format: &str) -> Result<()> {
             for g in &items {
                 println!(
                     "{},{},{},{}",
-                    g.pattern,
-                    g.meaning,
-                    g.level,
-                    g.example.as_deref().unwrap_or("")
+                    csv_field(&g.pattern),
+                    csv_field(&g.meaning),
+                    csv_field(&g.level),
+                    csv_field(g.example.as_deref().unwrap_or("")),
                 );
             }
         }

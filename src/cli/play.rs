@@ -60,8 +60,11 @@ pub async fn play_word(db: &Database, word: &str) -> Result<PathBuf> {
     ));
 
     if file.exists() {
+        eprintln!("using cached: {}", file.display());
         return Ok(file);
     }
+
+    eprintln!("synthesizing: {word}...");
 
     match config.backend.as_str() {
         "voicevox" => synthesize_voicevox(word, &config.speaker_id, &file).await?,
@@ -73,6 +76,8 @@ pub async fn play_word(db: &Database, word: &str) -> Result<PathBuf> {
             .build());
         }
     }
+
+    eprintln!("cached: {}", file.display());
 
     Ok(file)
 }

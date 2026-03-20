@@ -81,6 +81,15 @@ pub enum Command {
         #[command(subcommand)]
         action: ConfigAction,
     },
+    /// List vocabulary or grammar entries
+    List {
+        /// List grammar instead of vocabulary
+        #[arg(long)]
+        grammar: bool,
+        /// Filter by JLPT level
+        #[arg(long)]
+        level:   Option<String>,
+    },
     /// Export vocabulary or grammar data
     Export {
         /// Format: json, csv, anki
