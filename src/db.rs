@@ -20,46 +20,48 @@ use crate::{
 /// Application database wrapping the store layer.
 pub struct Database {
     store: DBStore,
-    path:  PathBuf,
+    path: PathBuf,
 }
 
 /// Current learning status returned by `kotoba status`.
 #[derive(Debug, Serialize, bon::Builder)]
 pub struct Status {
-    pub level:            String,
+    pub level: String,
     pub vocabulary_count: usize,
-    pub grammar_count:    usize,
-    pub due_reviews:      usize,
+    pub grammar_count: usize,
+    pub due_reviews: usize,
 }
 
 /// A vocabulary entry for display or export.
 #[derive(Debug, Serialize)]
 pub struct VocabularyItem {
-    pub word:    String,
+    pub word: String,
     pub reading: String,
+    pub romaji: String,
     pub meaning: String,
-    pub level:   String,
+    pub level: String,
 }
 
 /// An item due for SRS review.
 #[derive(Debug, Serialize)]
 pub struct ReviewItem {
-    pub word:      String,
-    pub reading:   String,
-    pub meaning:   String,
+    pub word: String,
+    pub reading: String,
+    pub romaji: String,
+    pub meaning: String,
     pub item_type: String,
-    pub due_at:    String,
+    pub due_at: String,
 }
 
 /// Learning progress statistics.
 #[derive(Debug, Serialize, bon::Builder)]
 pub struct Progress {
     pub total_vocabulary: usize,
-    pub total_grammar:    usize,
-    pub mastered:         usize,
-    pub learning:         usize,
-    pub new:              usize,
-    pub reviews_count:    usize,
+    pub total_grammar: usize,
+    pub mastered: usize,
+    pub learning: usize,
+    pub new: usize,
+    pub reviews_count: usize,
 }
 
 fn default_db_dir() -> Result<PathBuf> {
@@ -84,9 +86,13 @@ impl Database {
     }
 
     /// Return the database file path.
-    pub fn path(&self) -> &Path { &self.path }
+    pub fn path(&self) -> &Path {
+        &self.path
+    }
 
-    const fn pool(&self) -> &sqlx::SqlitePool { self.store.pool() }
+    const fn pool(&self) -> &sqlx::SqlitePool {
+        self.store.pool()
+    }
 
     /// Create all tables and seed default profile values.
     pub async fn init(&self) -> Result<()> {
@@ -116,6 +122,9 @@ impl Database {
     }
 
     /// Insert or update a vocabulary entry.
+    ///
+    /// Romaji is auto-generated from the reading using kana-to-romaji
+    /// conversion.
     pub async fn add_vocabulary(
         &self,
         word: &str,
@@ -123,11 +132,14 @@ impl Database {
         meaning: &str,
         level: &str,
     ) -> Result<()> {
+        let romaji = crate::romaji::to_romaji(reading);
         sqlx::query(
-            "INSERT OR REPLACE INTO vocabulary (word, reading, meaning, level) VALUES (?, ?, ?, ?)",
+            "INSERT OR REPLACE INTO vocabulary (word, reading, romaji, meaning, level) VALUES (?, \
+             ?, ?, ?, ?)",
         )
         .bind(word)
         .bind(reading)
+        .bind(&romaji)
         .bind(meaning)
         .bind(level)
         .execute(self.pool())
@@ -205,11 +217,12 @@ impl Database {
             .to_string();
 
         let rows: Vec<VocabDueRow> = sqlx::query_as(
-            "SELECT v.word, v.reading, v.meaning, r.reviewed_at, r.interval_days FROM vocabulary \
-             v LEFT JOIN ( SELECT item_id, reviewed_at, interval_days, ROW_NUMBER() OVER \
-             (PARTITION BY item_id ORDER BY reviewed_at DESC) as rn FROM reviews WHERE item_type \
-             = 'vocabulary' ) r ON v.id = r.item_id AND r.rn = 1 WHERE r.reviewed_at IS NULL OR \
-             datetime(r.reviewed_at, '+' || CAST(r.interval_days AS INTEGER) || ' days') <= ?",
+            "SELECT v.word, v.reading, v.romaji, v.meaning, r.reviewed_at, r.interval_days FROM \
+             vocabulary v LEFT JOIN ( SELECT item_id, reviewed_at, interval_days, ROW_NUMBER() \
+             OVER (PARTITION BY item_id ORDER BY reviewed_at DESC) as rn FROM reviews WHERE \
+             item_type = 'vocabulary' ) r ON v.id = r.item_id AND r.rn = 1 WHERE r.reviewed_at IS \
+             NULL OR datetime(r.reviewed_at, '+' || CAST(r.interval_days AS INTEGER) || ' days') \
+             <= ?",
         )
         .bind(&now)
         .fetch_all(self.pool())
@@ -219,9 +232,10 @@ impl Database {
         let items = rows
             .into_iter()
             .map(
-                |(word, reading, meaning, reviewed_at, interval)| ReviewItem {
+                |(word, reading, romaji, meaning, reviewed_at, interval)| ReviewItem {
                     word,
                     reading,
+                    romaji,
                     meaning,
                     item_type: "vocabulary".to_string(),
                     due_at: format_due_at(reviewed_at.as_deref(), interval),
@@ -256,6 +270,7 @@ impl Database {
             .map(|(pattern, meaning, reviewed_at, interval)| ReviewItem {
                 word: pattern,
                 reading: String::new(),
+                romaji: String::new(),
                 meaning,
                 item_type: "grammar".to_string(),
                 due_at: format_due_at(reviewed_at.as_deref(), interval),
@@ -302,8 +317,8 @@ impl Database {
 
     /// Return all vocabulary items for export.
     pub async fn all_vocabulary(&self) -> Result<Vec<VocabularyItem>> {
-        let rows: Vec<(String, String, String, String)> = sqlx::query_as(
-            "SELECT word, reading, meaning, level FROM vocabulary ORDER BY created_at",
+        let rows: Vec<(String, String, String, String, String)> = sqlx::query_as(
+            "SELECT word, reading, romaji, meaning, level FROM vocabulary ORDER BY created_at",
         )
         .fetch_all(self.pool())
         .await
@@ -311,9 +326,10 @@ impl Database {
 
         Ok(rows
             .into_iter()
-            .map(|(word, reading, meaning, level)| VocabularyItem {
+            .map(|(word, reading, romaji, meaning, level)| VocabularyItem {
                 word,
                 reading,
+                romaji,
                 meaning,
                 level,
             })
@@ -363,7 +379,7 @@ impl Database {
 }
 
 /// Row shape returned by the due-vocabulary query.
-type VocabDueRow = (String, String, String, Option<String>, Option<f64>);
+type VocabDueRow = (String, String, String, String, Option<String>, Option<f64>);
 
 fn format_due_at(reviewed_at: Option<&str>, interval: Option<f64>) -> String {
     match (reviewed_at, interval) {

@@ -22,14 +22,17 @@ pub async fn export(db: &Database, format: &str) -> Result<()> {
             println!("{json}");
         }
         "csv" => {
-            println!("word,reading,meaning,level");
+            println!("word,reading,romaji,meaning,level");
             for v in &vocab {
-                println!("{},{},{},{}", v.word, v.reading, v.meaning, v.level);
+                println!(
+                    "{},{},{},{},{}",
+                    v.word, v.reading, v.romaji, v.meaning, v.level
+                );
             }
         }
         "anki" => {
             for v in &vocab {
-                println!("{}\t{}  {}", v.word, v.reading, v.meaning);
+                println!("{}\t{} ({})  {}", v.word, v.reading, v.romaji, v.meaning);
             }
         }
         _ => unreachable!(),
