@@ -159,6 +159,21 @@ pub async fn add(repo_id: &str) -> Result<VoiceAddResult> {
 
     pb.finish_and_clear();
 
+    // Basic size validation — HuggingFace doesn't provide standard checksum
+    // sidecars
+    let file_size = std::fs::metadata(&model_path)
+        .context(error::IoSnafu)?
+        .len();
+    if file_size == 0 {
+        // Clean up the empty file
+        let _ = std::fs::remove_dir_all(&model_dir);
+        return Err(error::VoicevoxSnafu {
+            message: "downloaded model file is empty (0 bytes)".to_string(),
+        }
+        .build());
+    }
+    eprintln!("  downloaded {file_size} bytes");
+
     // Try to download config.json if available
     let config_url = format!("https://huggingface.co/{repo_id}/resolve/main/config.json");
     if let Ok(resp) = client.get(&config_url).send().await

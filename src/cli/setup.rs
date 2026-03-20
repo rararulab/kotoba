@@ -5,6 +5,7 @@ use std::{io::Write, path::PathBuf};
 use futures_util::StreamExt;
 use indicatif::{ProgressBar, ProgressStyle};
 use serde::Serialize;
+use sha2::{Digest, Sha256};
 use snafu::ResultExt;
 
 use crate::{
@@ -127,18 +128,23 @@ async fn download_voicevox(version: &str) -> Result<()> {
     let tmp = dir.with_extension("tmp");
     std::fs::create_dir_all(tmp.parent().expect("parent dir")).context(error::IoSnafu)?;
 
-    // Stream the response body to disk in chunks instead of buffering the
-    // entire archive in memory.
+    // Stream the response body to disk in chunks, computing SHA256 as we go.
     let mut stream = response.bytes_stream();
     let mut file = std::fs::File::create(&tmp).context(error::IoSnafu)?;
+    let mut hasher = Sha256::new();
 
     while let Some(chunk) = stream.next().await {
         let chunk = chunk.context(error::HttpSnafu)?;
+        hasher.update(&chunk);
         file.write_all(&chunk).context(error::IoSnafu)?;
         pb.inc(chunk.len() as u64);
     }
 
     pb.finish_and_clear();
+
+    // Verify the download against the SHA256 sidecar file
+    let actual_hash = format!("{:x}", hasher.finalize());
+    verify_against_sidecar(&client, &url, &actual_hash, &tmp).await?;
 
     // Extract .vvpp archive (zip format)
     let file = std::fs::File::open(&tmp).context(error::IoSnafu)?;
@@ -175,4 +181,115 @@ async fn download_voicevox(version: &str) -> Result<()> {
 
     eprintln!("  voicevox engine installed at {}", dir.display());
     Ok(())
+}
+
+/// Download the `.txt` sidecar from GitHub releases and compare its hash
+/// against the computed hash. Deletes the file on mismatch.
+async fn verify_against_sidecar(
+    client: &reqwest::Client,
+    asset_url: &str,
+    actual_hash: &str,
+    downloaded_file: &PathBuf,
+) -> Result<()> {
+    let sidecar_url = format!("{asset_url}.txt");
+    eprintln!("  verifying checksum...");
+
+    let sidecar_resp = client
+        .get(&sidecar_url)
+        .send()
+        .await
+        .context(error::HttpSnafu)?;
+
+    if !sidecar_resp.status().is_success() {
+        eprintln!(
+            "  warning: checksum sidecar not available (HTTP {}), skipping verification",
+            sidecar_resp.status()
+        );
+        return Ok(());
+    }
+
+    let sidecar_text = sidecar_resp.text().await.context(error::HttpSnafu)?;
+    let expected_hash = parse_checksum_sidecar(&sidecar_text);
+
+    verify_checksum(actual_hash, &expected_hash).inspect_err(|_| {
+        // Delete the corrupted download before returning the error
+        let _ = std::fs::remove_file(downloaded_file);
+    })
+}
+
+/// Parse a checksum sidecar file, extracting the hex hash.
+///
+/// Handles two common formats:
+/// - Just the hex hash on a line
+/// - `<hash>  <filename>` (BSD/GNU coreutils style)
+fn parse_checksum_sidecar(content: &str) -> String {
+    let trimmed = content.trim();
+    // If the line contains whitespace, the hash is the first token
+    trimmed
+        .split_whitespace()
+        .next()
+        .unwrap_or(trimmed)
+        .to_lowercase()
+}
+
+/// Compare a computed hash against an expected hash string.
+fn verify_checksum(actual: &str, expected: &str) -> Result<()> {
+    if actual == expected {
+        eprintln!("  checksum verified OK");
+        Ok(())
+    } else {
+        error::ChecksumMismatchSnafu {
+            expected: expected.to_string(),
+            actual:   actual.to_string(),
+        }
+        .fail()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn verify_checksum_match() {
+        let hash = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855";
+        assert!(verify_checksum(hash, hash).is_ok());
+    }
+
+    #[test]
+    fn verify_checksum_mismatch() {
+        let actual = "aaaa";
+        let expected = "bbbb";
+        let err = verify_checksum(actual, expected).unwrap_err();
+        let msg = err.to_string();
+        assert!(msg.contains("aaaa"), "error should contain actual hash");
+        assert!(msg.contains("bbbb"), "error should contain expected hash");
+    }
+
+    #[test]
+    fn verify_checksum_with_known_sha256() {
+        // SHA256 of empty input
+        use sha2::{Digest, Sha256};
+        let hash = format!("{:x}", Sha256::digest(b""));
+        let expected = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855";
+        assert!(verify_checksum(&hash, expected).is_ok());
+    }
+
+    #[test]
+    fn parse_sidecar_hash_only() {
+        let content = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855\n";
+        assert_eq!(
+            parse_checksum_sidecar(content),
+            "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        );
+    }
+
+    #[test]
+    fn parse_sidecar_with_filename() {
+        let content = "E3B0C44298FC1C149AFBF4C8996FB924  voicevox_engine-macos-arm64-0.22.2.vvpp\n";
+        assert_eq!(
+            parse_checksum_sidecar(content),
+            "e3b0c44298fc1c149afbf4c8996fb924"
+        );
+    }
 }

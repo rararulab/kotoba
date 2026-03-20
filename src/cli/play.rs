@@ -171,4 +171,18 @@ mod tests {
         assert_eq!(config.backend, "vits");
         assert_eq!(config.speaker_id, "my-model");
     }
+
+    #[test]
+    fn parse_voice_config_empty_string() {
+        let config = parse_voice_config("");
+        assert_eq!(config.backend, "");
+        assert_eq!(config.speaker_id, "1");
+    }
+
+    #[test]
+    fn parse_voice_config_multiple_colons() {
+        let config = parse_voice_config("vits:model:extra");
+        assert_eq!(config.backend, "vits");
+        assert_eq!(config.speaker_id, "model:extra");
+    }
 }

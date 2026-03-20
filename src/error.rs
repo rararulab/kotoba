@@ -49,6 +49,9 @@ pub enum KotobaError {
 
     #[snafu(display("model not found: {name} — download with `kotoba voice add`"))]
     ModelNotFound { name: String },
+
+    #[snafu(display("checksum mismatch: expected {expected}, got {actual}"))]
+    ChecksumMismatch { expected: String, actual: String },
 }
 
 pub type Result<T> = std::result::Result<T, KotobaError>;
