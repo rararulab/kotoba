@@ -1,4 +1,4 @@
-//! SQLite store layer — adapted from yunara-store.
+//! `SQLite` store layer — adapted from yunara-store.
 
 mod config;
 mod db;

@@ -8,17 +8,17 @@ use crate::error::{self, Result};
 
 fn cache_dir() -> Result<PathBuf> {
     let dir = dirs::home_dir()
-        .ok_or(error::HomeNotFoundSnafu.build())?
+        .ok_or_else(|| error::HomeNotFoundSnafu.build())?
         .join(".kotoba")
         .join("audio");
     std::fs::create_dir_all(&dir).context(error::IoSnafu)?;
     Ok(dir)
 }
 
-/// Generate or return a cached WAV file for a word via VOICEVOX.
-pub async fn play_word(word: &str) -> Result<PathBuf> {
+/// Generate or return a cached WAV file for a word.
+pub async fn play_word(word: &str, backend: &str) -> Result<PathBuf> {
     let cache = cache_dir()?;
-    let file = cache.join(format!("{word}.wav"));
+    let file = cache.join(format!("{word}_{backend}.wav"));
 
     if file.exists() {
         return Ok(file);

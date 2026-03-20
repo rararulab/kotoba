@@ -31,7 +31,7 @@ pub async fn record_review(db: &Database, word: &str, quality: u8) -> Result<()>
         .await
 }
 
-fn first_review(quality: u8) -> (f64, f64, i32) {
+const fn first_review(quality: u8) -> (f64, f64, i32) {
     match quality {
         5 => (1.0, 2.5, 1),
         3 => (0.5, 2.5, 1),

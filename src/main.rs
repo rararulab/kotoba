@@ -29,11 +29,11 @@ async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
             level,
         } => {
             db.add_vocabulary(&word, &reading, &meaning, &level).await?;
-            println!("added: {}({}) = {}", word, reading, meaning);
+            println!("added: {word}({reading}) = {meaning}");
         }
         Command::Seen { word, quality } => {
             srs::record_review(&db, &word, quality).await?;
-            println!("recorded review: {} quality={}", word, quality);
+            println!("recorded review: {word} quality={quality}");
         }
         Command::Review { grammar } => {
             let items = if grammar {
@@ -47,13 +47,30 @@ async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
             let progress = db.progress(weekly).await?;
             println!("{}", serde_json::to_string_pretty(&progress)?);
         }
-        Command::Play { word } => {
-            let path = cli::play::play_word(&word).await?;
+        Command::Play { word, backend } => {
+            let path = cli::play::play_word(&word, &backend).await?;
             println!("{}", path.display());
         }
+        Command::Setup => {
+            cli::setup::run(&db).await?;
+        }
+        Command::Doctor => {
+            cli::doctor::run(&db).await?;
+        }
+        Command::Voice { action } => match action {
+            cli::VoiceAction::List => {
+                cli::voice::list(&db).await?;
+            }
+            cli::VoiceAction::Set { name } => {
+                cli::voice::set(&db, &name).await?;
+            }
+            cli::VoiceAction::Add { repo_id } => {
+                cli::voice::add(&repo_id).await?;
+            }
+        },
         Command::Config { key, value } => {
             db.set_config(&key, &value).await?;
-            println!("set {} = {}", key, value);
+            println!("set {key} = {value}");
         }
         Command::Export { format } => {
             cli::export::export(&db, &format).await?;

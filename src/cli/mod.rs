@@ -1,7 +1,10 @@
 //! CLI command definitions and subcommand modules.
 
+pub mod doctor;
 pub mod export;
 pub mod play;
+pub mod setup;
+pub mod voice;
 
 use clap::{Parser, Subcommand};
 
@@ -16,7 +19,11 @@ pub struct Cli {
 /// Available subcommands.
 #[derive(Subcommand)]
 pub enum Command {
-    /// Initialize the database
+    /// Download VOICEVOX Engine, initialize DB, and configure environment
+    Setup,
+    /// Check all dependencies (DB, VOICEVOX, models, disk space)
+    Doctor,
+    /// Initialize the database (without full setup)
     Init,
     /// Show current learning status (level, vocab count, due reviews)
     Status,
@@ -51,10 +58,18 @@ pub enum Command {
         #[arg(long)]
         weekly: bool,
     },
-    /// Play pronunciation via VOICEVOX TTS
+    /// Play pronunciation via TTS
     Play {
         /// The word to pronounce
         word: String,
+        /// TTS backend (voicevox or vits)
+        #[arg(long, default_value = "voicevox")]
+        backend: String,
+    },
+    /// Manage voice models
+    Voice {
+        #[command(subcommand)]
+        action: VoiceAction,
     },
     /// Set a config value
     Config {
@@ -67,5 +82,22 @@ pub enum Command {
     Export {
         /// Format: json, csv, anki
         format: String,
+    },
+}
+
+/// Voice management subcommands.
+#[derive(Subcommand)]
+pub enum VoiceAction {
+    /// List available voices (VOICEVOX built-in + downloaded HF models)
+    List,
+    /// Set the current voice
+    Set {
+        /// Voice name or ID
+        name: String,
+    },
+    /// Download a voice model from `HuggingFace`
+    Add {
+        /// `HuggingFace` repo ID (e.g. username/model-name)
+        repo_id: String,
     },
 }

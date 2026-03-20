@@ -5,7 +5,7 @@ use sqlx::sqlite::SqlitePoolOptions;
 use super::db::DBStore;
 use super::err::Result;
 
-/// SQLite database configuration.
+/// `SQLite` database configuration.
 #[derive(Debug, Clone, bon::Builder, serde::Serialize, serde::Deserialize)]
 pub struct DatabaseConfig {
     /// Maximum number of connections in the pool.
@@ -14,12 +14,12 @@ pub struct DatabaseConfig {
     pub max_connections: u32,
 }
 
-fn default_max_connections() -> u32 {
+const fn default_max_connections() -> u32 {
     5
 }
 
 impl DatabaseConfig {
-    /// Open a SQLite database at the given URL.
+    /// Open a `SQLite` database at the given URL.
     ///
     /// Sets WAL mode, busy timeout and foreign key pragmas.
     pub async fn open(&self, database_url: &str) -> Result<DBStore> {

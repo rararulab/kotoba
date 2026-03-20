@@ -1,10 +1,10 @@
-//! Database store wrapping SQLite connection pool.
+//! Database store wrapping `SQLite` connection pool.
 
 use sqlx::{Sqlite, SqlitePool};
 
 use super::err::Result;
 
-/// Database store that manages the SQLite connection pool.
+/// Database store that manages the `SQLite` connection pool.
 #[derive(Clone)]
 pub struct DBStore {
     pool: SqlitePool,
@@ -12,12 +12,12 @@ pub struct DBStore {
 
 impl DBStore {
     /// Create a new store from an existing pool.
-    pub fn new(pool: SqlitePool) -> Self {
+    pub const fn new(pool: SqlitePool) -> Self {
         Self { pool }
     }
 
-    /// Get the underlying SQLite pool.
-    pub fn pool(&self) -> &SqlitePool {
+    /// Get the underlying `SQLite` pool.
+    pub const fn pool(&self) -> &SqlitePool {
         &self.pool
     }
 
