@@ -1,6 +1,7 @@
 mod cli;
 mod db;
 mod error;
+mod romaji;
 mod srs;
 mod store;
 #[allow(dead_code)] // not yet wired into play.rs — integration pending branch merge
@@ -10,6 +11,7 @@ use clap::Parser;
 use cli::{Cli, Command};
 
 #[tokio::main]
+#[allow(clippy::too_many_lines)]
 async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
     let cli = Cli::parse();
     let db = db::Database::open_default().await?;
@@ -32,9 +34,34 @@ async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
             db.add_vocabulary(&word, &reading, &meaning, &level).await?;
             println!("added: {word}({reading}) = {meaning}");
         }
-        Command::Seen { word, quality } => {
-            srs::record_review(&db, &word, quality).await?;
-            println!("recorded review: {word} quality={quality}");
+        Command::Grammar { action } => match action {
+            cli::GrammarAction::Add {
+                pattern,
+                meaning,
+                level,
+                example,
+            } => {
+                db.add_grammar(&pattern, &meaning, &level, example.as_deref())
+                    .await?;
+                println!("added grammar: {pattern} = {meaning}");
+            }
+            cli::GrammarAction::List { level } => {
+                let items = db.all_grammar(level.as_deref()).await?;
+                println!("{}", serde_json::to_string_pretty(&items)?);
+            }
+        },
+        Command::Seen {
+            word,
+            quality,
+            grammar,
+        } => {
+            if grammar {
+                srs::record_grammar_review(&db, &word, quality).await?;
+                println!("recorded grammar review: {word} quality={quality}");
+            } else {
+                srs::record_review(&db, &word, quality).await?;
+                println!("recorded review: {word} quality={quality}");
+            }
         }
         Command::Review { grammar } => {
             let items = if grammar {
@@ -48,8 +75,8 @@ async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
             let progress = db.progress(weekly).await?;
             println!("{}", serde_json::to_string_pretty(&progress)?);
         }
-        Command::Play { word, backend } => {
-            let path = cli::play::play_word(&word, &backend).await?;
+        Command::Play { word } => {
+            let path = cli::play::play_word(&db, &word).await?;
             println!("{}", path.display());
         }
         Command::Setup => {
@@ -69,12 +96,24 @@ async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
                 cli::voice::add(&repo_id).await?;
             }
         },
-        Command::Config { key, value } => {
-            db.set_config(&key, &value).await?;
-            println!("set {key} = {value}");
-        }
-        Command::Export { format } => {
-            cli::export::export(&db, &format).await?;
+        Command::Config { action } => match action {
+            cli::ConfigAction::Set { key, value } => {
+                db.set_config(&key, &value).await?;
+                println!("set {key} = {value}");
+            }
+            cli::ConfigAction::Get { key } => {
+                let value = db.get_config(&key).await?;
+                println!("{}", value.as_deref().unwrap_or("(not set)"));
+            }
+            cli::ConfigAction::List => {
+                let entries = db.all_config().await?;
+                for (key, value) in entries {
+                    println!("{key} = {value}");
+                }
+            }
+        },
+        Command::Export { format, grammar } => {
+            cli::export::export(&db, &format, grammar).await?;
         }
     }
 

@@ -14,13 +14,29 @@ use crate::{
 
 /// Record a review for a vocabulary word and update SRS state.
 pub async fn record_review(db: &Database, word: &str, quality: u8) -> Result<()> {
+    let item_id = db.get_vocabulary_id(word).await?;
+    record_review_item(db, item_id, "vocabulary", quality).await
+}
+
+/// Record a review for a grammar pattern and update SRS state.
+pub async fn record_grammar_review(db: &Database, pattern: &str, quality: u8) -> Result<()> {
+    let item_id = db.get_grammar_id(pattern).await?;
+    record_review_item(db, item_id, "grammar", quality).await
+}
+
+/// Shared SRS review logic for both vocabulary and grammar items.
+async fn record_review_item(
+    db: &Database,
+    item_id: i64,
+    item_type: &str,
+    quality: u8,
+) -> Result<()> {
     ensure!(
         matches!(quality, 1 | 3 | 5),
         error::InvalidQualitySnafu { value: quality }
     );
 
-    let item_id = db.get_vocabulary_id(word).await?;
-    let prev = db.get_latest_review(item_id, "vocabulary").await?;
+    let prev = db.get_latest_review(item_id, item_type).await?;
 
     let (interval, ease, reps) = prev.map_or_else(
         || first_review(quality),
@@ -29,7 +45,7 @@ pub async fn record_review(db: &Database, word: &str, quality: u8) -> Result<()>
         },
     );
 
-    db.insert_review(item_id, "vocabulary", quality, interval, ease, reps)
+    db.insert_review(item_id, item_type, quality, interval, ease, reps)
         .await
 }
 
