@@ -28,6 +28,9 @@ CREATE TABLE IF NOT EXISTS reviews (
     reps INTEGER NOT NULL
 );
 
+CREATE INDEX IF NOT EXISTS idx_reviews_item ON reviews (item_id, item_type);
+CREATE INDEX IF NOT EXISTS idx_reviews_reviewed_at ON reviews (reviewed_at);
+
 CREATE TABLE IF NOT EXISTS user_profile (
     key TEXT PRIMARY KEY,
     value TEXT NOT NULL

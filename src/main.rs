@@ -178,6 +178,15 @@ async fn run() -> std::result::Result<(), Box<dyn std::error::Error>> {
                 );
             }
         },
+        Command::List { grammar, level } => {
+            if grammar {
+                let items = db.all_grammar(level.as_deref()).await?;
+                println!("{}", serde_json::to_string_pretty(&items)?);
+            } else {
+                let items = db.all_vocabulary(level.as_deref()).await?;
+                println!("{}", serde_json::to_string_pretty(&items)?);
+            }
+        }
         Command::Export { format, grammar } => {
             cli::export::export(&db, &format, grammar).await?;
         }

@@ -9,7 +9,10 @@ async fn vocabulary_export_has_all_fields() {
         .await
         .expect("add failed");
 
-    let items = db.all_vocabulary().await.expect("all_vocabulary failed");
+    let items = db
+        .all_vocabulary(None)
+        .await
+        .expect("all_vocabulary failed");
     assert_eq!(items.len(), 1);
 
     let v = &items[0];
@@ -44,7 +47,10 @@ async fn vocabulary_export_serializes_to_json() {
         .await
         .expect("add failed");
 
-    let items = db.all_vocabulary().await.expect("all_vocabulary failed");
+    let items = db
+        .all_vocabulary(None)
+        .await
+        .expect("all_vocabulary failed");
     let json = serde_json::to_string(&items).expect("serialization failed");
     assert!(json.contains("\"word\":\"猫\""));
     assert!(json.contains("\"romaji\":\"neko\""));

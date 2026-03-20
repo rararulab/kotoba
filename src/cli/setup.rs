@@ -31,7 +31,7 @@ fn voicevox_dir() -> Result<PathBuf> {
     Ok(dir)
 }
 
-fn voicevox_download_url() -> String {
+fn voicevox_download_url(version: &str) -> String {
     // macOS assets: voicevox_engine-macos-{arch}-{ver}.vvpp (no -cpu suffix)
     // Linux/Windows: voicevox_engine-{os}-cpu-{ver}.vvpp (no arch, has -cpu)
     let platform = if cfg!(target_os = "macos") {
@@ -48,7 +48,7 @@ fn voicevox_download_url() -> String {
     };
 
     format!(
-        "https://github.com/VOICEVOX/voicevox_engine/releases/download/{VOICEVOX_VERSION}/voicevox_engine-{platform}-{VOICEVOX_VERSION}.vvpp"
+        "https://github.com/VOICEVOX/voicevox_engine/releases/download/{version}/voicevox_engine-{platform}-{version}.vvpp"
     )
 }
 
@@ -67,14 +67,25 @@ pub async fn run(db: &Database) -> Result<SetupResult> {
     db.init().await?;
     eprintln!("  database ready at {}", db.path().display());
 
+    let version = db
+        .get_config("voicevox_version")
+        .await?
+        .unwrap_or_else(|| VOICEVOX_VERSION.to_string());
+
     if is_voicevox_installed()? {
         eprintln!("  voicevox engine already installed");
     } else {
-        download_voicevox().await?;
+        download_voicevox(&version).await?;
     }
 
-    db.set_config("tts_backend", "voicevox").await?;
-    db.set_config("voicevox_speaker", "1").await?;
+    // Only set voice defaults if not already configured, so re-running setup
+    // does not overwrite user customizations.
+    if db.get_config("tts_backend").await?.is_none() {
+        db.set_config("tts_backend", "voicevox").await?;
+    }
+    if db.get_config("voicevox_speaker").await?.is_none() {
+        db.set_config("voicevox_speaker", "1").await?;
+    }
 
     eprintln!("setup complete!");
 
@@ -84,11 +95,11 @@ pub async fn run(db: &Database) -> Result<SetupResult> {
     })
 }
 
-async fn download_voicevox() -> Result<()> {
-    let url = voicevox_download_url();
+async fn download_voicevox(version: &str) -> Result<()> {
+    let url = voicevox_download_url(version);
     let dir = voicevox_dir()?;
 
-    eprintln!("  downloading voicevox engine {VOICEVOX_VERSION}...");
+    eprintln!("  downloading voicevox engine {version}...");
     eprintln!("  url: {url}");
 
     let client = reqwest::Client::new();

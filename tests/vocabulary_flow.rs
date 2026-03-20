@@ -11,7 +11,10 @@ async fn add_and_retrieve_vocabulary() {
         .await
         .expect("add_vocabulary failed");
 
-    let items = db.all_vocabulary().await.expect("all_vocabulary failed");
+    let items = db
+        .all_vocabulary(None)
+        .await
+        .expect("all_vocabulary failed");
     assert_eq!(items.len(), 1);
     assert_eq!(items[0].word, "食べる");
     assert_eq!(items[0].reading, "たべる");
@@ -26,7 +29,10 @@ async fn romaji_auto_generated_on_add() {
         .await
         .expect("add_vocabulary failed");
 
-    let items = db.all_vocabulary().await.expect("all_vocabulary failed");
+    let items = db
+        .all_vocabulary(None)
+        .await
+        .expect("all_vocabulary failed");
     assert_eq!(items[0].romaji, romaji::to_romaji("のむ"));
     assert_eq!(items[0].romaji, "nomu");
 }
@@ -41,7 +47,10 @@ async fn duplicate_word_replaces_entry() {
         .await
         .expect("second add failed");
 
-    let items = db.all_vocabulary().await.expect("all_vocabulary failed");
+    let items = db
+        .all_vocabulary(None)
+        .await
+        .expect("all_vocabulary failed");
     assert_eq!(items.len(), 1, "duplicate should replace, not insert");
     assert_eq!(items[0].meaning, "dog (pet)");
     assert_eq!(items[0].level, "N4");
@@ -67,6 +76,9 @@ async fn multiple_vocabulary_entries() {
         .await
         .expect("add failed");
 
-    let items = db.all_vocabulary().await.expect("all_vocabulary failed");
+    let items = db
+        .all_vocabulary(None)
+        .await
+        .expect("all_vocabulary failed");
     assert_eq!(items.len(), 3);
 }
