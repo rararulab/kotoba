@@ -9,7 +9,7 @@ on:
 jobs:
   release-plz-release:
     name: Release-plz release
-    runs-on: ubuntu-latest
+    runs-on: arc-runner-set
     if: ${{ github.repository_owner == 'rararulab' && github.event.pull_request.merged == true && contains(github.event.pull_request.labels.*.name, 'release') }}
     permissions:
       contents: write

@@ -20,24 +20,19 @@ permissions:
 jobs:
   rust-format:
     name: Rust Format
-    runs-on: ubuntu-latest
+    runs-on: arc-runner-set
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
         with:
           persist-credentials: false
 
-      - name: Install Rust nightly (for rustfmt)
-        uses: dtolnay/rust-toolchain@nightly
-        with:
-          components: rustfmt
-
       - name: Check formatting
         run: cargo +nightly fmt --all -- --check
 
   cargo-deny:
     name: Cargo Deny
-    runs-on: ubuntu-latest
+    runs-on: arc-runner-set
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -45,11 +40,11 @@ jobs:
           persist-credentials: false
 
       - name: Check advisories, licenses, bans
-        uses: EmbarkStudios/cargo-deny-action@v2
+        run: cargo deny check
 
   lint-success:
     name: Lint Success
-    runs-on: ubuntu-latest
+    runs-on: arc-runner-set
     needs: [rust-format, cargo-deny]
     if: always()
     steps:

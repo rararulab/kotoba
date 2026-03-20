@@ -10,7 +10,7 @@ permissions:
 jobs:
   delete-branch:
     name: Delete closed PR branch
-    runs-on: ubuntu-latest
+    runs-on: arc-runner-set
     if: >-
       github.event.pull_request.merged == false &&
       startsWith(github.event.pull_request.head.ref, 'release-plz-')
