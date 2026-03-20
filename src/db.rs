@@ -432,6 +432,16 @@ impl Database {
         Ok(row.map(|(v,)| v))
     }
 
+    /// Return all user profile config entries, sorted by key.
+    pub async fn all_config(&self) -> Result<Vec<(String, String)>> {
+        let rows: Vec<(String, String)> =
+            sqlx::query_as("SELECT key, value FROM user_profile ORDER BY key")
+                .fetch_all(self.pool())
+                .await
+                .context(error::SqlxSnafu)?;
+        Ok(rows)
+    }
+
     async fn count(&self, table: &str) -> Result<usize> {
         let row: (i64,) = sqlx::query_as(&format!("SELECT COUNT(*) FROM {table}"))
             .fetch_one(self.pool())
