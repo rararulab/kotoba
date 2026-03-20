@@ -92,10 +92,22 @@ async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
                 cli::voice::add(&repo_id).await?;
             }
         },
-        Command::Config { key, value } => {
-            db.set_config(&key, &value).await?;
-            println!("set {key} = {value}");
-        }
+        Command::Config { action } => match action {
+            cli::ConfigAction::Set { key, value } => {
+                db.set_config(&key, &value).await?;
+                println!("set {key} = {value}");
+            }
+            cli::ConfigAction::Get { key } => {
+                let value = db.get_config(&key).await?;
+                println!("{}", value.as_deref().unwrap_or("(not set)"));
+            }
+            cli::ConfigAction::List => {
+                let entries = db.all_config().await?;
+                for (key, value) in entries {
+                    println!("{key} = {value}");
+                }
+            }
+        },
         Command::Export { format, grammar } => {
             cli::export::export(&db, &format, grammar).await?;
         }
