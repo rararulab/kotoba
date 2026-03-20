@@ -6,7 +6,7 @@ use snafu::ResultExt;
 
 use crate::{
     error::{self, Result},
-    tts::{TtsBackend, VitsBackend, VoicevoxBackend},
+    tts::{KokoroBackend, TtsBackend, VitsBackend, VoicevoxBackend},
 };
 
 /// Parsed voice configuration specifying backend and speaker/model identifier.
@@ -63,6 +63,8 @@ pub async fn play_word(word: &str) -> Result<PathBuf> {
             Box::new(VoicevoxBackend::new(base_url, config.speaker_id.clone()))
         }
         "vits" => Box::new(VitsBackend::new(config.speaker_id.clone())),
+        // TODO: Phase 2 will need to parse +rvc: suffix from speaker_id
+        "kokoro" => Box::new(KokoroBackend::new(config.speaker_id.clone())),
         other => {
             return Err(error::VoicevoxSnafu {
                 message: format!("unknown voice backend: {other}"),
@@ -121,6 +123,13 @@ mod tests {
         let config = parse_voice_config("vits:my-model");
         assert_eq!(config.backend, "vits");
         assert_eq!(config.speaker_id, "my-model");
+    }
+
+    #[test]
+    fn parse_voice_config_kokoro() {
+        let config = parse_voice_config("kokoro:af_heart");
+        assert_eq!(config.backend, "kokoro");
+        assert_eq!(config.speaker_id, "af_heart");
     }
 
     #[test]

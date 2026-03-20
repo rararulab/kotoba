@@ -54,8 +54,106 @@ pub fn list() -> Result<()> {
     Ok(())
 }
 
-/// Download an ONNX model from `HuggingFace`.
+/// Download Kokoro ONNX model files from GitHub releases.
+///
+/// Downloads `kokoro-v1.0.onnx` and `voices-v1.0.bin` into
+/// `~/.kotoba/models/kokoro/`. Returns early if both files already exist.
+async fn add_kokoro() -> Result<ModelAddResult> {
+    let model_dir = crate::paths::models_dir().join("kokoro");
+    let onnx_path = model_dir.join("kokoro-v1.0.onnx");
+    let voices_path = model_dir.join("voices-v1.0.bin");
+
+    if onnx_path.exists() && voices_path.exists() {
+        eprintln!("kokoro model already downloaded: {}", model_dir.display());
+        return Ok(ModelAddResult {
+            model: "kokoro".to_string(),
+            path:  model_dir.display().to_string(),
+        });
+    }
+
+    std::fs::create_dir_all(&model_dir).context(error::IoSnafu)?;
+
+    let client = crate::http::client();
+
+    let files = [
+        (
+            "kokoro-v1.0.onnx",
+            "https://github.com/thewh1teagle/kokoro-onnx/releases/download/model-files-v1.0/kokoro-v1.0.onnx",
+        ),
+        (
+            "voices-v1.0.bin",
+            "https://github.com/thewh1teagle/kokoro-onnx/releases/download/model-files-v1.0/voices-v1.0.bin",
+        ),
+    ];
+
+    for (filename, url) in &files {
+        let dest = model_dir.join(filename);
+        if dest.exists() {
+            eprintln!("{filename} already exists, skipping");
+            continue;
+        }
+
+        eprintln!("downloading {filename}...");
+
+        let response = client.get(*url).send().await.context(error::HttpSnafu)?;
+
+        if !response.status().is_success() {
+            return Err(error::KokoroSnafu {
+                message: format!("failed to download {filename}: HTTP {}", response.status()),
+            }
+            .build());
+        }
+
+        let total_size = response.content_length().unwrap_or(0);
+
+        let pb = ProgressBar::new(total_size);
+        pb.set_style(
+            ProgressStyle::default_bar()
+                .template(
+                    "{bar:40.cyan/blue} {percent}% {bytes}/{total_bytes}  {bytes_per_sec}  ETA \
+                     {eta}",
+                )
+                .expect("valid progress bar template")
+                .progress_chars("=>-"),
+        );
+
+        let mut stream = response.bytes_stream();
+        let mut file = std::fs::File::create(&dest).context(error::IoSnafu)?;
+
+        while let Some(chunk) = stream.next().await {
+            let chunk = chunk.context(error::HttpSnafu)?;
+            file.write_all(&chunk).context(error::IoSnafu)?;
+            pb.inc(chunk.len() as u64);
+        }
+
+        pb.finish_and_clear();
+
+        let file_size = std::fs::metadata(&dest).context(error::IoSnafu)?.len();
+        if file_size == 0 {
+            let _ = std::fs::remove_file(&dest);
+            return Err(error::KokoroSnafu {
+                message: format!("{filename} is empty (0 bytes)"),
+            }
+            .build());
+        }
+        eprintln!("  downloaded {file_size} bytes");
+    }
+
+    eprintln!("kokoro model saved to: {}", model_dir.display());
+    eprintln!("use `kotoba voice set kokoro:<voice>` to activate");
+
+    Ok(ModelAddResult {
+        model: "kokoro".to_string(),
+        path:  model_dir.display().to_string(),
+    })
+}
+
+/// Download an ONNX model from `HuggingFace`, or the Kokoro model.
 pub async fn add(repo_id: &str) -> Result<ModelAddResult> {
+    if repo_id == "kokoro" {
+        return add_kokoro().await;
+    }
+
     let models_path = crate::paths::models_dir();
     std::fs::create_dir_all(&models_path).context(error::IoSnafu)?;
     let model_name = repo_id.split('/').next_back().unwrap_or(repo_id);

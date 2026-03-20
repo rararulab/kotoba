@@ -1,11 +1,13 @@
 //! TTS backend trait and implementations.
 
+mod kokoro;
 mod vits;
 mod voicevox;
 
 use std::path::Path;
 
 use async_trait::async_trait;
+pub use kokoro::KokoroBackend;
 pub use vits::VitsBackend;
 pub use voicevox::VoicevoxBackend;
 

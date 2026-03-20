@@ -52,6 +52,10 @@ pub fn list() -> Result<()> {
         for entry in entries.flatten() {
             if entry.path().is_dir() {
                 let dir_name = entry.file_name().to_string_lossy().to_string();
+                // Skip directories managed by other backends
+                if dir_name == "kokoro" || dir_name == "rvc" {
+                    continue;
+                }
                 let key = format!("vits:{dir_name}");
                 voices.push(VoiceInfo {
                     name:    format!("{dir_name} [{key}]"),
@@ -59,6 +63,31 @@ pub fn list() -> Result<()> {
                     active:  current == key,
                 });
             }
+        }
+    }
+
+    // Kokoro ONNX voices (available only when the model is downloaded)
+    let kokoro_model = models_path.join("kokoro").join("kokoro-v1.0.onnx");
+    if kokoro_model.exists() {
+        let kokoro_voices = [
+            "af_heart",
+            "af_bella",
+            "af_nicole",
+            "af_sarah",
+            "af_sky",
+            "am_adam",
+            "am_michael",
+            "jf_alpha",
+            "jf_gongitsune",
+            "jm_kumo",
+        ];
+        for voice_name in &kokoro_voices {
+            let key = format!("kokoro:{voice_name}");
+            voices.push(VoiceInfo {
+                name:    format!("Kokoro {voice_name} [{key}]"),
+                backend: "kokoro".to_string(),
+                active:  current == key,
+            });
         }
     }
 

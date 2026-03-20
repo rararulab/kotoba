@@ -65,11 +65,8 @@ fn tokenize(text: &str, lang: &str) -> Vec<i64> {
 }
 
 /// Return the directory where Kokoro models are stored (`~/.kotoba/models/kokoro`).
-fn models_dir() -> Result<PathBuf> {
-    let home = dirs::home_dir().ok_or_else(|| {
-        std::io::Error::new(std::io::ErrorKind::NotFound, "home directory not found")
-    }).context(IoSnafu)?;
-    Ok(home.join(".kotoba").join("models").join("kokoro"))
+fn models_dir() -> PathBuf {
+    crate::paths::models_dir().join("kokoro")
 }
 
 /// Synthesize speech from text using the local Kokoro ONNX model.
@@ -78,7 +75,7 @@ fn models_dir() -> Result<PathBuf> {
 /// tokenizes the input text, runs ONNX inference, and writes the
 /// resulting audio to `output` as a WAV file.
 pub async fn synthesize(text: &str, lang: &str, voice: &str, output: &Path) -> Result<()> {
-    let model_dir = models_dir()?;
+    let model_dir = models_dir();
     let model_path = model_dir.join("kokoro-v1.0.onnx");
 
     if !model_path.exists() {
@@ -211,7 +208,7 @@ mod tests {
 
     #[test]
     fn models_dir_is_under_kotoba() {
-        let dir = models_dir().expect("models_dir should succeed");
+        let dir = models_dir();
         assert!(
             dir.ends_with(".kotoba/models/kokoro"),
             "expected path ending with .kotoba/models/kokoro, got {dir:?}"
