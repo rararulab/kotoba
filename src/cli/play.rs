@@ -65,7 +65,7 @@ pub async fn play_word(db: &Database, word: &str) -> Result<PathBuf> {
 
     match config.backend.as_str() {
         "voicevox" => synthesize_voicevox(word, &config.speaker_id, &file).await?,
-        "vits" => synthesize_vits()?,
+        "vits" => synthesize_vits(&config.speaker_id, word, &file).await?,
         other => {
             return Err(error::VoicevoxSnafu {
                 message: format!("unknown voice backend: {other}"),
@@ -127,12 +127,19 @@ async fn synthesize_voicevox(word: &str, speaker_id: &str, out_path: &PathBuf) -
     Ok(())
 }
 
-/// Placeholder for VITS inference — will be implemented in Issue #12.
-fn synthesize_vits() -> Result<()> {
-    Err(error::VoicevoxSnafu {
-        message: "VITS inference not yet implemented".to_string(),
-    }
-    .build())
+/// Synthesize audio using local VITS ONNX inference.
+async fn synthesize_vits(model_name: &str, word: &str, out_path: &std::path::Path) -> Result<()> {
+    crate::vits::synthesize(model_name, word, out_path)
+        .await
+        .map_err(|e| match e {
+            crate::vits::VitsError::ModelNotFound { path } => {
+                error::ModelNotFoundSnafu { name: path }.build()
+            }
+            other => error::VoicevoxSnafu {
+                message: other.to_string(),
+            }
+            .build(),
+        })
 }
 
 #[cfg(test)]

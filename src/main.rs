@@ -4,7 +4,6 @@ mod error;
 mod romaji;
 mod srs;
 mod store;
-#[allow(dead_code)] // not yet wired into play.rs — integration pending branch merge
 mod vits;
 
 use clap::Parser;
