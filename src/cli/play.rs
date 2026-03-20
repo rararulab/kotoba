@@ -4,24 +4,27 @@ use std::path::PathBuf;
 
 use snafu::ResultExt;
 
-use crate::db::Database;
-use crate::error::{self, Result};
+use crate::{
+    db::Database,
+    error::{self, Result},
+};
 
 /// Parsed voice configuration specifying backend and speaker/model identifier.
 struct VoiceConfig {
-    backend: String,
+    backend:    String,
     speaker_id: String,
 }
 
-/// Parse a `backend:id` voice config string (e.g. `voicevox:3`, `vits:model-name`).
+/// Parse a `backend:id` voice config string (e.g. `voicevox:3`,
+/// `vits:model-name`).
 fn parse_voice_config(raw: &str) -> VoiceConfig {
     match raw.split_once(':') {
         Some((backend, id)) => VoiceConfig {
-            backend: backend.to_string(),
+            backend:    backend.to_string(),
             speaker_id: id.to_string(),
         },
         None => VoiceConfig {
-            backend: raw.to_string(),
+            backend:    raw.to_string(),
             speaker_id: "1".to_string(),
         },
     }
@@ -36,10 +39,11 @@ fn cache_dir() -> Result<PathBuf> {
     Ok(dir)
 }
 
-/// Generate or return a cached WAV file for a word using the voice configured in the database.
+/// Generate or return a cached WAV file for a word using the voice configured
+/// in the database.
 ///
-/// Reads the `voice` key from `user_profile` to determine which TTS backend and speaker to use.
-/// Falls back to `voicevox:1` when no config is set.
+/// Reads the `voice` key from `user_profile` to determine which TTS backend and
+/// speaker to use. Falls back to `voicevox:1` when no config is set.
 pub async fn play_word(db: &Database, word: &str) -> Result<PathBuf> {
     let raw_config = db
         .get_config("voice")
