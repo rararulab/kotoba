@@ -276,7 +276,8 @@ impl Database {
             .fetch_one(self.pool())
             .await
             .context(error::SqlxSnafu)?;
-        let new = (total_vocabulary + total_grammar).saturating_sub(count_as_usize(reviewed_items.0));
+        let new =
+            (total_vocabulary + total_grammar).saturating_sub(count_as_usize(reviewed_items.0));
 
         let date_filter = if weekly {
             "reviewed_at >= datetime('now', '-7 days')"
