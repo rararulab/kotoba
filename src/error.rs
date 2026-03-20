@@ -55,6 +55,9 @@ pub enum KotobaError {
 
     #[snafu(display("zip error: {message}"))]
     Zip { message: String },
+
+    #[snafu(display("Kokoro TTS error: {message}"))]
+    Kokoro { message: String },
 }
 
 pub type Result<T> = std::result::Result<T, KotobaError>;
