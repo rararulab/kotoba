@@ -44,6 +44,7 @@ fn cache_dir() -> Result<PathBuf> {
 ///
 /// Reads the `voice` key from `user_profile` to determine which TTS backend and
 /// speaker to use. Falls back to `voicevox:1` when no config is set.
+#[tracing::instrument(skip(db))]
 pub async fn play_word(db: &Database, word: &str) -> Result<PathBuf> {
     let raw_config = db
         .get_config("voice")

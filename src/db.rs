@@ -124,11 +124,14 @@ impl Database {
     const fn pool(&self) -> &sqlx::SqlitePool { self.store.pool() }
 
     /// Create all tables and seed default profile values.
+    #[tracing::instrument(skip(self))]
     pub async fn init(&self) -> Result<()> {
+        tracing::debug!(path = %self.path.display(), "initializing database schema");
         sqlx::raw_sql(include_str!("schema.sql"))
             .execute(self.pool())
             .await
             .context(error::SqlxSnafu)?;
+        tracing::debug!("database schema initialized");
         Ok(())
     }
 
@@ -154,6 +157,7 @@ impl Database {
     ///
     /// Romaji is auto-generated from the reading using kana-to-romaji
     /// conversion.
+    #[tracing::instrument(skip(self))]
     pub async fn add_vocabulary(
         &self,
         word: &str,
@@ -162,6 +166,7 @@ impl Database {
         level: &str,
     ) -> Result<()> {
         let romaji = crate::romaji::to_romaji(reading);
+        tracing::debug!(%romaji, "auto-generated romaji from reading");
         sqlx::query(
             "INSERT OR REPLACE INTO vocabulary (word, reading, romaji, meaning, level) VALUES (?, \
              ?, ?, ?, ?)",
@@ -239,6 +244,7 @@ impl Database {
     }
 
     /// Return vocabulary items due for review.
+    #[tracing::instrument(skip(self))]
     pub async fn due_vocabulary(&self) -> Result<Vec<ReviewItem>> {
         let now = chrono::Utc::now()
             .naive_utc()
@@ -276,6 +282,7 @@ impl Database {
     }
 
     /// Return grammar items due for review.
+    #[tracing::instrument(skip(self))]
     pub async fn due_grammar(&self) -> Result<Vec<ReviewItem>> {
         let now = chrono::Utc::now()
             .naive_utc()
@@ -366,6 +373,7 @@ impl Database {
     }
 
     /// Insert or update a grammar entry.
+    #[tracing::instrument(skip(self))]
     pub async fn add_grammar(
         &self,
         pattern: &str,

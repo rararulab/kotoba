@@ -13,12 +13,14 @@ use crate::{
 };
 
 /// Record a review for a vocabulary word and update SRS state.
+#[tracing::instrument(skip(db))]
 pub async fn record_review(db: &Database, word: &str, quality: u8) -> Result<()> {
     let item_id = db.get_vocabulary_id(word).await?;
     record_review_item(db, item_id, "vocabulary", quality).await
 }
 
 /// Record a review for a grammar pattern and update SRS state.
+#[tracing::instrument(skip(db))]
 pub async fn record_grammar_review(db: &Database, pattern: &str, quality: u8) -> Result<()> {
     let item_id = db.get_grammar_id(pattern).await?;
     record_review_item(db, item_id, "grammar", quality).await
