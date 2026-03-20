@@ -69,10 +69,7 @@ pub enum Command {
     /// Play pronunciation via TTS
     Play {
         /// The word to pronounce
-        word:    String,
-        /// TTS backend (voicevox or vits)
-        #[arg(long, default_value = "voicevox")]
-        backend: String,
+        word: String,
     },
     /// Manage voice models
     Voice {
