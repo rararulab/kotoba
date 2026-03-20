@@ -41,6 +41,15 @@ pub struct VocabularyItem {
     pub level:   String,
 }
 
+/// A grammar entry for display or export.
+#[derive(Debug, Serialize)]
+pub struct GrammarItem {
+    pub pattern: String,
+    pub meaning: String,
+    pub level:   String,
+    pub example: Option<String>,
+}
+
 /// An item due for SRS review.
 #[derive(Debug, Serialize)]
 pub struct ReviewItem {
@@ -316,6 +325,76 @@ impl Database {
                 reading,
                 meaning,
                 level,
+            })
+            .collect())
+    }
+
+    /// Insert or update a grammar entry.
+    pub async fn add_grammar(
+        &self,
+        pattern: &str,
+        meaning: &str,
+        level: &str,
+        example: Option<&str>,
+    ) -> Result<()> {
+        sqlx::query(
+            "INSERT OR REPLACE INTO grammar (pattern, meaning, level, example) VALUES (?, ?, ?, ?)",
+        )
+        .bind(pattern)
+        .bind(meaning)
+        .bind(level)
+        .bind(example)
+        .execute(self.pool())
+        .await
+        .context(error::SqlxSnafu)?;
+        Ok(())
+    }
+
+    /// Look up a grammar item's database ID by pattern.
+    pub async fn get_grammar_id(&self, pattern: &str) -> Result<i64> {
+        let row: Option<(i64,)> = sqlx::query_as("SELECT id FROM grammar WHERE pattern = ?")
+            .bind(pattern)
+            .fetch_optional(self.pool())
+            .await
+            .context(error::SqlxSnafu)?;
+
+        row.map(|(id,)| id).ok_or_else(|| {
+            error::GrammarNotFoundSnafu {
+                pattern: pattern.to_string(),
+            }
+            .build()
+        })
+    }
+
+    /// Return all grammar items, optionally filtered by JLPT level.
+    pub async fn all_grammar(&self, level: Option<&str>) -> Result<Vec<GrammarItem>> {
+        let rows: Vec<(String, String, String, Option<String>)> = match level {
+            Some(lvl) => {
+                sqlx::query_as(
+                    "SELECT pattern, meaning, level, example FROM grammar WHERE level = ? ORDER \
+                     BY created_at",
+                )
+                .bind(lvl)
+                .fetch_all(self.pool())
+                .await
+            }
+            None => {
+                sqlx::query_as(
+                    "SELECT pattern, meaning, level, example FROM grammar ORDER BY created_at",
+                )
+                .fetch_all(self.pool())
+                .await
+            }
+        }
+        .context(error::SqlxSnafu)?;
+
+        Ok(rows
+            .into_iter()
+            .map(|(pattern, meaning, level, example)| GrammarItem {
+                pattern,
+                meaning,
+                level,
+                example,
             })
             .collect())
     }
