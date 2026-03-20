@@ -30,9 +30,34 @@ async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
             db.add_vocabulary(&word, &reading, &meaning, &level).await?;
             println!("added: {word}({reading}) = {meaning}");
         }
-        Command::Seen { word, quality } => {
-            srs::record_review(&db, &word, quality).await?;
-            println!("recorded review: {word} quality={quality}");
+        Command::Grammar { action } => match action {
+            cli::GrammarAction::Add {
+                pattern,
+                meaning,
+                level,
+                example,
+            } => {
+                db.add_grammar(&pattern, &meaning, &level, example.as_deref())
+                    .await?;
+                println!("added grammar: {pattern} = {meaning}");
+            }
+            cli::GrammarAction::List { level } => {
+                let items = db.all_grammar(level.as_deref()).await?;
+                println!("{}", serde_json::to_string_pretty(&items)?);
+            }
+        },
+        Command::Seen {
+            word,
+            quality,
+            grammar,
+        } => {
+            if grammar {
+                srs::record_grammar_review(&db, &word, quality).await?;
+                println!("recorded grammar review: {word} quality={quality}");
+            } else {
+                srs::record_review(&db, &word, quality).await?;
+                println!("recorded review: {word} quality={quality}");
+            }
         }
         Command::Review { grammar } => {
             let items = if grammar {
@@ -71,8 +96,8 @@ async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
             db.set_config(&key, &value).await?;
             println!("set {key} = {value}");
         }
-        Command::Export { format } => {
-            cli::export::export(&db, &format).await?;
+        Command::Export { format, grammar } => {
+            cli::export::export(&db, &format, grammar).await?;
         }
     }
 

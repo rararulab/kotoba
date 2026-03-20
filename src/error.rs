@@ -14,6 +14,9 @@ pub enum KotobaError {
     #[snafu(display("word not found: {word}"))]
     WordNotFound { word: String },
 
+    #[snafu(display("grammar not found: {pattern}"))]
+    GrammarNotFound { pattern: String },
+
     #[snafu(display("invalid quality rating: {value} (must be 1, 3, or 5)"))]
     InvalidQuality { value: u8 },
 
