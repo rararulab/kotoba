@@ -66,12 +66,9 @@ build-release:
 # Run all pre-commit checks
 pre-commit: fmt-check lint test
 
-# Install git hooks
+# Install git hooks via prek
 setup-hooks:
-    @echo '#!/usr/bin/env bash' > .git/hooks/pre-commit
-    @echo 'just pre-commit' >> .git/hooks/pre-commit
-    @chmod +x .git/hooks/pre-commit
-    @echo "Pre-commit hook installed."
+    prek install
 
 # ─── Changelog & Release ─────────────────────────────────────────────
 
