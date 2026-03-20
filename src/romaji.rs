@@ -445,4 +445,104 @@ mod tests {
     fn empty_string() {
         assert_eq!(to_romaji(""), "");
     }
+
+    #[test]
+    fn pure_ascii_passthrough() {
+        assert_eq!(to_romaji("hello world"), "hello world");
+        assert_eq!(to_romaji("ABC 123!"), "ABC 123!");
+    }
+
+    #[test]
+    fn pure_kanji_passthrough() {
+        assert_eq!(to_romaji("漢字"), "漢字");
+        assert_eq!(to_romaji("東京都"), "東京都");
+    }
+
+    #[test]
+    fn all_hiragana_t_row() {
+        assert_eq!(to_romaji("たちつてと"), "tachitsuteto");
+    }
+
+    #[test]
+    fn all_hiragana_n_row() {
+        assert_eq!(to_romaji("なにぬねの"), "naninuneno");
+    }
+
+    #[test]
+    fn all_hiragana_h_row() {
+        assert_eq!(to_romaji("はひふへほ"), "hahifuheho");
+    }
+
+    #[test]
+    fn all_hiragana_m_row() {
+        assert_eq!(to_romaji("まみむめも"), "mamimumemo");
+    }
+
+    #[test]
+    fn all_hiragana_y_row() {
+        assert_eq!(to_romaji("やゆよ"), "yayuyo");
+    }
+
+    #[test]
+    fn all_hiragana_r_row() {
+        assert_eq!(to_romaji("らりるれろ"), "rarirurero");
+    }
+
+    #[test]
+    fn all_hiragana_w_row() {
+        assert_eq!(to_romaji("わをん"), "wawon");
+    }
+
+    #[test]
+    fn all_yoon_combinations() {
+        // K-yoon
+        assert_eq!(to_romaji("きゃきゅきょ"), "kyakyukyo");
+        // S-yoon
+        assert_eq!(to_romaji("しゃしゅしょ"), "shashusho");
+        // C-yoon
+        assert_eq!(to_romaji("ちゃちゅちょ"), "chachucho");
+        // N-yoon
+        assert_eq!(to_romaji("にゃにゅにょ"), "nyanyunyo");
+        // H-yoon
+        assert_eq!(to_romaji("ひゃひゅひょ"), "hyahyuhyo");
+        // M-yoon
+        assert_eq!(to_romaji("みゃみゅみょ"), "myamyumyo");
+        // R-yoon
+        assert_eq!(to_romaji("りゃりゅりょ"), "ryaryuryo");
+        // G-yoon (dakuten)
+        assert_eq!(to_romaji("ぎゃぎゅぎょ"), "gyagyugyo");
+        // J-yoon (dakuten)
+        assert_eq!(to_romaji("じゃじゅじょ"), "jajujo");
+        // B-yoon (dakuten)
+        assert_eq!(to_romaji("びゃびゅびょ"), "byabyubyo");
+        // P-yoon (handakuten)
+        assert_eq!(to_romaji("ぴゃぴゅぴょ"), "pyapyupyo");
+    }
+
+    #[test]
+    fn multiple_sokuon() {
+        // Sokuon before another sokuon: first っ looks ahead to next っ which starts vowel-less
+        // The actual behavior: first っ can't double (next char is っ), second っ doubles t
+        assert_eq!(to_romaji("まっったく"), "maっttaku");
+    }
+
+    #[test]
+    fn choon_at_start_of_string() {
+        // No preceding vowel — chōon is silently ignored
+        assert_eq!(to_romaji("ー"), "");
+    }
+
+    #[test]
+    fn mixed_hiragana_katakana() {
+        assert_eq!(to_romaji("あイうエお"), "aiueo");
+        assert_eq!(to_romaji("ひらカタ"), "hirakata");
+    }
+
+    #[test]
+    fn long_word_with_many_conversions() {
+        // "shinbunkisha" — newspaper reporter
+        assert_eq!(to_romaji("しんぶんきしゃ"), "shinbunkisha");
+        // "choukyorishassou" — long distance departure
+        assert_eq!(to_romaji("ちょうきょり"), "choukyori");
+    }
 }

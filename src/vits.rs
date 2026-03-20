@@ -323,4 +323,72 @@ mod tests {
 
         std::fs::remove_dir_all(&dir).ok();
     }
+
+    #[test]
+    fn phoneme_ids_empty_input_produces_bos_eos_only() {
+        let ids = text_to_phoneme_ids("");
+        // Empty input should produce just [BOS, EOS]
+        assert_eq!(ids, vec![0, 0]);
+    }
+
+    #[test]
+    fn phoneme_ids_alternating_pattern() {
+        // "abc" should produce [0, id_a, 0, id_b, 0, id_c, 0]
+        let ids = text_to_phoneme_ids("abc");
+        assert_eq!(ids.len(), 7, "3 chars => BOS + 3 IDs + 2 padding + EOS = 7");
+        assert_eq!(ids[0], 0, "BOS");
+        assert_eq!(ids[2], 0, "padding between a and b");
+        assert_eq!(ids[4], 0, "padding between b and c");
+        assert_eq!(ids[6], 0, "EOS");
+        // Actual character IDs should be non-zero
+        assert_ne!(ids[1], 0);
+        assert_ne!(ids[3], 0);
+        assert_ne!(ids[5], 0);
+    }
+
+    #[test]
+    fn phoneme_ids_simple_kana() {
+        // "あ" maps to "a" in kana_to_ascii, then "a" gets an ID
+        let ids = text_to_phoneme_ids("あ");
+        assert_eq!(ids[0], 0, "BOS");
+        assert_eq!(*ids.last().expect("non-empty"), 0, "EOS");
+        assert!(ids.len() > 2, "should have content beyond BOS/EOS");
+    }
+
+    #[test]
+    fn kana_char_to_phoneme_hiragana_vowels() {
+        assert_eq!(kana_char_to_phoneme('あ'), Some("a"));
+        assert_eq!(kana_char_to_phoneme('い'), Some("i"));
+        assert_eq!(kana_char_to_phoneme('う'), Some("u"));
+        assert_eq!(kana_char_to_phoneme('え'), Some("e"));
+        assert_eq!(kana_char_to_phoneme('お'), Some("o"));
+    }
+
+    #[test]
+    fn kana_char_to_phoneme_katakana_matches_hiragana() {
+        assert_eq!(kana_char_to_phoneme('ア'), kana_char_to_phoneme('あ'));
+        assert_eq!(kana_char_to_phoneme('イ'), kana_char_to_phoneme('い'));
+        assert_eq!(kana_char_to_phoneme('ウ'), kana_char_to_phoneme('う'));
+        assert_eq!(kana_char_to_phoneme('エ'), kana_char_to_phoneme('え'));
+        assert_eq!(kana_char_to_phoneme('オ'), kana_char_to_phoneme('お'));
+    }
+
+    #[test]
+    fn kana_char_to_phoneme_returns_none_for_ascii() {
+        assert_eq!(kana_char_to_phoneme('a'), None);
+        assert_eq!(kana_char_to_phoneme('Z'), None);
+    }
+
+    #[test]
+    fn kana_char_to_phoneme_consonant_rows() {
+        assert_eq!(kana_char_to_phoneme('か'), Some("ka"));
+        assert_eq!(kana_char_to_phoneme('さ'), Some("sa"));
+        assert_eq!(kana_char_to_phoneme('た'), Some("ta"));
+        assert_eq!(kana_char_to_phoneme('な'), Some("na"));
+        assert_eq!(kana_char_to_phoneme('は'), Some("ha"));
+        assert_eq!(kana_char_to_phoneme('ま'), Some("ma"));
+        assert_eq!(kana_char_to_phoneme('ら'), Some("ra"));
+        assert_eq!(kana_char_to_phoneme('わ'), Some("wa"));
+        assert_eq!(kana_char_to_phoneme('ん'), Some("n"));
+    }
 }

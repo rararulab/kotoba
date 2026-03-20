@@ -120,4 +120,95 @@ mod tests {
         let (interval, ..) = next_review(5, 300.0, 2.5, 10);
         assert!(interval <= 365.0);
     }
+
+    #[test]
+    #[allow(clippy::float_cmp)] // Exact constants from first_review, no arithmetic drift
+    fn first_review_quality_3() {
+        let (interval, ease, reps) = first_review(3);
+        assert_eq!(interval, 0.5);
+        assert_eq!(ease, 2.5);
+        assert_eq!(reps, 1);
+    }
+
+    #[test]
+    fn quality_3_keeps_ease_unchanged() {
+        let (_, ease, _) = next_review(3, 3.0, 2.2, 3);
+        assert!(
+            (ease - 2.2).abs() < f64::EPSILON,
+            "ease should stay the same for quality=3"
+        );
+    }
+
+    #[test]
+    fn consecutive_failures_floor_ease_at_1_3() {
+        // Simulate multiple consecutive quality=1 reviews
+        let (_, ease1, _) = next_review(1, 10.0, 2.5, 5);
+        let (_, ease2, _) = next_review(1, 0.1, ease1, 0);
+        let (_, ease3, _) = next_review(1, 0.1, ease2, 0);
+        let (_, ease4, _) = next_review(1, 0.1, ease3, 0);
+        let (_, ease5, _) = next_review(1, 0.1, ease4, 0);
+
+        assert!(ease5 >= 1.3, "ease must not drop below 1.3, got {ease5}");
+        assert!(
+            (ease5 - 1.3).abs() < f64::EPSILON,
+            "ease should be exactly 1.3 after many failures, got {ease5}"
+        );
+    }
+
+    #[test]
+    fn consecutive_successes_cap_ease_at_3_0() {
+        // Start at high ease and keep giving quality=5
+        let (_, ease1, _) = next_review(5, 1.0, 2.8, 3);
+        let (i2, ease2, _) = next_review(5, 1.0 * ease1, ease1, 4);
+        let (_, ease3, _) = next_review(5, i2, ease2, 5);
+
+        assert!(ease3 <= 3.0, "ease must not exceed 3.0, got {ease3}");
+    }
+
+    #[test]
+    fn multi_review_chain_interval_growth() {
+        // Simulate a chain of quality=5 reviews and verify interval grows
+        let (mut interval, mut ease, mut reps) = first_review(5);
+        let mut intervals = vec![interval];
+
+        for _ in 0..6 {
+            let result = next_review(5, interval, ease, reps);
+            interval = result.0;
+            ease = result.1;
+            reps = result.2;
+            intervals.push(interval);
+        }
+
+        // Each interval should be >= the previous (monotonically non-decreasing)
+        for window in intervals.windows(2) {
+            assert!(
+                window[1] >= window[0],
+                "interval should grow: {} -> {}",
+                window[0],
+                window[1]
+            );
+        }
+
+        // After 7 reviews the interval should be significantly larger than the initial
+        assert!(
+            interval > 10.0,
+            "after 7 quality=5 reviews interval should be >10 days, got {interval}"
+        );
+    }
+
+    #[test]
+    fn reps_counter_increments() {
+        let (_, _, reps1) = next_review(5, 1.0, 2.5, 0);
+        assert_eq!(reps1, 1);
+        let (_, _, reps2) = next_review(5, 1.0, 2.5, 1);
+        assert_eq!(reps2, 2);
+        let (_, _, reps3) = next_review(3, 3.0, 2.5, 2);
+        assert_eq!(reps3, 3);
+    }
+
+    #[test]
+    fn reps_resets_on_failure() {
+        let (_, _, reps) = next_review(1, 10.0, 2.5, 5);
+        assert_eq!(reps, 0);
+    }
 }
