@@ -40,7 +40,10 @@ pub async fn run(db: &Database) -> Result<()> {
     // 4. Audio cache directory
     checks.push(check_audio_cache());
 
-    // 5. Disk space
+    // 5. Kokoro model
+    checks.push(check_kokoro_model());
+
+    // 6. Disk space
     checks.push(check_disk_space());
 
     let healthy = checks.iter().all(|c| c.status == "ok");
@@ -141,6 +144,28 @@ fn check_audio_cache() -> Check {
             status: "ok".to_string(),
             detail: format!("not created yet (will be at {})", dir.display()),
         }
+    }
+}
+
+fn check_kokoro_model() -> Check {
+    let kokoro_dir = dirs::home_dir().map(|h| h.join(".kotoba/models/kokoro"));
+
+    match kokoro_dir {
+        Some(d) if d.join("kokoro-v1.0.onnx").exists() => Check {
+            name:   "kokoro_model".to_string(),
+            status: "ok".to_string(),
+            detail: "installed".to_string(),
+        },
+        Some(_) => Check {
+            name:   "kokoro_model".to_string(),
+            status: "ok".to_string(),
+            detail: "not installed (optional — run `kotoba voice add kokoro`)".to_string(),
+        },
+        None => Check {
+            name:   "kokoro_model".to_string(),
+            status: "error".to_string(),
+            detail: "home directory not found".to_string(),
+        },
     }
 }
 
