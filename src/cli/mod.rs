@@ -30,14 +30,14 @@ pub enum Command {
     /// Add a new vocabulary word
     Add {
         /// The word (kanji or kana)
-        word:    String,
+        word: String,
         /// Kana reading
         reading: String,
         /// Chinese meaning
         meaning: String,
         /// JLPT level
         #[arg(long, default_value = "N5")]
-        level:   String,
+        level: String,
     },
     /// Manage grammar patterns
     Grammar {
@@ -46,8 +46,8 @@ pub enum Command {
     },
     /// Record that a word or grammar pattern was seen/reviewed
     Seen {
-        /// The word or grammar pattern
-        word:    String,
+        /// The word
+        word: String,
         /// Quality: 1 (forgot), 3 (recognized), 5 (instant recall)
         quality: u8,
         /// Record review for a grammar pattern instead of vocabulary
@@ -69,7 +69,7 @@ pub enum Command {
     /// Play pronunciation via TTS
     Play {
         /// The word to pronounce
-        word:    String,
+        word: String,
         /// TTS backend (voicevox or vits)
         #[arg(long, default_value = "voicevox")]
         backend: String,
@@ -79,12 +79,10 @@ pub enum Command {
         #[command(subcommand)]
         action: VoiceAction,
     },
-    /// Set a config value
+    /// Manage config values
     Config {
-        /// Config key (e.g. blending-intensity)
-        key:   String,
-        /// Config value
-        value: String,
+        #[command(subcommand)]
+        action: ConfigAction,
     },
     /// Export vocabulary or grammar data
     Export {
@@ -118,6 +116,25 @@ pub enum GrammarAction {
         #[arg(long)]
         level: Option<String>,
     },
+}
+
+/// Config management subcommands.
+#[derive(Subcommand)]
+pub enum ConfigAction {
+    /// Set a config value
+    Set {
+        /// Config key (e.g. blending-intensity)
+        key: String,
+        /// Config value
+        value: String,
+    },
+    /// Get a config value
+    Get {
+        /// Config key to look up
+        key: String,
+    },
+    /// List all config values
+    List,
 }
 
 /// Voice management subcommands.
