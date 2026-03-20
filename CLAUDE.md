@@ -1,0 +1,24 @@
+# CLAUDE.md — Kotoba Development Guide
+
+## Communication
+- 用中文与用户交流
+
+## Project Identity
+
+Kotoba is an immersive Japanese language learning CLI built in Rust. It manages vocabulary/grammar with SRS (spaced repetition), generates pronunciation via VOICEVOX TTS, and integrates with the language-learning skill in rara-skills.
+
+## Development Workflow
+
+All changes — no matter how small — follow the issue → worktree → PR → merge flow. No exceptions.
+
+@docs/guides/workflow.md
+@docs/guides/commit-style.md
+
+## Code Quality
+
+@docs/guides/rust-style.md
+@docs/guides/code-comments.md
+
+## Guardrails
+
+@docs/guides/anti-patterns.md
