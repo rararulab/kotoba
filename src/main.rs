@@ -1,6 +1,7 @@
 mod cli;
 mod db;
 mod error;
+mod romaji;
 mod srs;
 mod store;
 
