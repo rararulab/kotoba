@@ -11,6 +11,7 @@ use clap::Parser;
 use cli::{Cli, Command};
 
 #[tokio::main]
+#[allow(clippy::too_many_lines)] // CLI dispatch — each arm is trivial
 async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
     let cli = Cli::parse();
     let db = db::Database::open_default().await?;

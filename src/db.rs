@@ -47,7 +47,7 @@ pub struct VocabularyItem {
 pub struct GrammarItem {
     pub pattern: String,
     pub meaning: String,
-    pub level:   String,
+    pub level: String,
     pub example: Option<String>,
 }
 
@@ -82,6 +82,15 @@ fn default_db_dir() -> Result<PathBuf> {
 }
 
 impl Database {
+    /// Open a database at a specific path (for test isolation).
+    #[allow(dead_code)] // Used via lib.rs in integration tests, invisible to the binary crate
+    pub async fn open_at(path: PathBuf) -> Result<Self> {
+        let url = format!("sqlite:{}?mode=rwc", path.display());
+        let config = DatabaseConfig::builder().build();
+        let store = config.open(&url).await.context(error::StoreSnafu)?;
+        Ok(Self { store, path })
+    }
+
     /// Open the default database at `~/.kotoba/kotoba.db`.
     pub async fn open_default() -> Result<Self> {
         let dir = default_db_dir()?;
@@ -384,25 +393,24 @@ impl Database {
 
     /// Return all grammar items, optionally filtered by JLPT level.
     pub async fn all_grammar(&self, level: Option<&str>) -> Result<Vec<GrammarItem>> {
-        let rows: Vec<(String, String, String, Option<String>)> = match level {
-            Some(lvl) => {
-                sqlx::query_as(
+        let rows: Vec<(String, String, String, Option<String>)> =
+            match level {
+                Some(lvl) => sqlx::query_as(
                     "SELECT pattern, meaning, level, example FROM grammar WHERE level = ? ORDER \
                      BY created_at",
                 )
                 .bind(lvl)
                 .fetch_all(self.pool())
-                .await
+                .await,
+                None => {
+                    sqlx::query_as(
+                        "SELECT pattern, meaning, level, example FROM grammar ORDER BY created_at",
+                    )
+                    .fetch_all(self.pool())
+                    .await
+                }
             }
-            None => {
-                sqlx::query_as(
-                    "SELECT pattern, meaning, level, example FROM grammar ORDER BY created_at",
-                )
-                .fetch_all(self.pool())
-                .await
-            }
-        }
-        .context(error::SqlxSnafu)?;
+            .context(error::SqlxSnafu)?;
 
         Ok(rows
             .into_iter()

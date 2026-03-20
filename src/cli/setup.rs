@@ -46,7 +46,9 @@ pub fn is_voicevox_installed() -> Result<bool> {
 }
 
 /// Get the path to the VOICEVOX Engine executable.
-pub fn voicevox_executable() -> Result<PathBuf> { Ok(voicevox_dir()?.join("run")) }
+pub fn voicevox_executable() -> Result<PathBuf> {
+    Ok(voicevox_dir()?.join("run"))
+}
 
 /// Run full setup: download VOICEVOX Engine + initialize DB.
 pub async fn run(db: &Database) -> Result<()> {

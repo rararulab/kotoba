@@ -84,7 +84,7 @@ pub enum Command {
     /// Export vocabulary or grammar data
     Export {
         /// Format: json, csv, anki
-        format:  String,
+        format: String,
         /// Export grammar instead of vocabulary
         #[arg(long)]
         grammar: bool,
@@ -102,7 +102,7 @@ pub enum GrammarAction {
         meaning: String,
         /// JLPT level
         #[arg(long, default_value = "N5")]
-        level:   String,
+        level: String,
         /// Example sentence
         #[arg(long)]
         example: Option<String>,
