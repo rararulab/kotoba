@@ -521,8 +521,9 @@ mod tests {
 
     #[test]
     fn multiple_sokuon() {
-        // Sokuon before another sokuon: first っ looks ahead to next っ which starts vowel-less
-        // The actual behavior: first っ can't double (next char is っ), second っ doubles t
+        // Sokuon before another sokuon: first っ looks ahead to next っ which starts
+        // vowel-less The actual behavior: first っ can't double (next char is
+        // っ), second っ doubles t
         assert_eq!(to_romaji("まっったく"), "maっttaku");
     }
 

@@ -11,13 +11,13 @@ pub enum Error {
     Sqlx {
         source: sqlx::Error,
         #[snafu(implicit)]
-        loc: snafu::Location,
+        loc:    snafu::Location,
     },
 
     #[snafu(transparent)]
     Migration {
         source: sqlx::migrate::MigrateError,
         #[snafu(implicit)]
-        loc: snafu::Location,
+        loc:    snafu::Location,
     },
 }
