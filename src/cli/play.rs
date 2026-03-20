@@ -40,12 +40,14 @@ fn cache_dir() -> Result<PathBuf> {
 ///
 /// Reads the `voice` key from `user_profile` to determine which TTS backend and speaker to use.
 /// Falls back to `voicevox:1` when no config is set.
+#[tracing::instrument(skip(db))]
 pub async fn play_word(db: &Database, word: &str) -> Result<PathBuf> {
     let raw_config = db
         .get_config("voice")
         .await?
         .unwrap_or_else(|| "voicevox:1".to_string());
     let config = parse_voice_config(&raw_config);
+    tracing::debug!(backend = %config.backend, speaker_id = %config.speaker_id, "synthesizing audio");
 
     let cache = cache_dir()?;
     let file = cache.join(format!(
