@@ -94,6 +94,15 @@ impl Database {
         Ok(Self { store, path })
     }
 
+    /// Open a database at a custom path (used for test isolation).
+    #[allow(dead_code)] // used by integration tests via lib.rs
+    pub async fn open_at(path: PathBuf) -> Result<Self> {
+        let url = format!("sqlite:{}?mode=rwc", path.display());
+        let config = DatabaseConfig::builder().build();
+        let store = config.open(&url).await.context(error::StoreSnafu)?;
+        Ok(Self { store, path })
+    }
+
     /// Return the database file path.
     pub fn path(&self) -> &Path { &self.path }
 
