@@ -1,9 +1,11 @@
 //! Vocabulary export in multiple formats.
 
-use snafu::{ensure, ResultExt};
+use snafu::{ResultExt, ensure};
 
-use crate::db::Database;
-use crate::error::{self, Result};
+use crate::{
+    db::Database,
+    error::{self, Result},
+};
 
 /// Export all vocabulary in the specified format to stdout.
 pub async fn export(db: &Database, format: &str) -> Result<()> {

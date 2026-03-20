@@ -5,15 +5,17 @@ use std::path::PathBuf;
 use serde::Serialize;
 use snafu::ResultExt;
 
-use crate::db::Database;
-use crate::error::{self, Result};
+use crate::{
+    db::Database,
+    error::{self, Result},
+};
 
 /// A voice entry for display.
 #[derive(Debug, Serialize)]
 pub struct VoiceInfo {
-    pub name: String,
+    pub name:    String,
     pub backend: String,
-    pub active: bool,
+    pub active:  bool,
 }
 
 fn models_dir() -> Result<PathBuf> {
@@ -51,9 +53,9 @@ pub async fn list(db: &Database) -> Result<()> {
     for (id, name) in &voicevox_speakers {
         let key = format!("voicevox:{id}");
         voices.push(VoiceInfo {
-            name: format!("{name} [{key}]"),
+            name:    format!("{name} [{key}]"),
             backend: "voicevox".to_string(),
-            active: current == key,
+            active:  current == key,
         });
     }
 
@@ -65,9 +67,9 @@ pub async fn list(db: &Database) -> Result<()> {
                 let dir_name = entry.file_name().to_string_lossy().to_string();
                 let key = format!("vits:{dir_name}");
                 voices.push(VoiceInfo {
-                    name: format!("{dir_name} [{key}]"),
+                    name:    format!("{dir_name} [{key}]"),
                     backend: "vits".to_string(),
-                    active: current == key,
+                    active:  current == key,
                 });
             }
         }
@@ -88,10 +90,7 @@ pub async fn set(db: &Database, name: &str) -> Result<()> {
 /// Download a voice model from `HuggingFace`.
 pub async fn add(repo_id: &str) -> Result<()> {
     let models_path = models_dir()?;
-    let model_name = repo_id
-        .split('/')
-        .next_back()
-        .unwrap_or(repo_id);
+    let model_name = repo_id.split('/').next_back().unwrap_or(repo_id);
     let model_dir = models_path.join(model_name);
 
     if model_dir.exists() {
@@ -103,9 +102,7 @@ pub async fn add(repo_id: &str) -> Result<()> {
 
     // Download model.onnx from HuggingFace
     let client = reqwest::Client::new();
-    let model_url = format!(
-        "https://huggingface.co/{repo_id}/resolve/main/model.onnx"
-    );
+    let model_url = format!("https://huggingface.co/{repo_id}/resolve/main/model.onnx");
 
     let response = client
         .get(&model_url)
@@ -115,10 +112,7 @@ pub async fn add(repo_id: &str) -> Result<()> {
 
     if !response.status().is_success() {
         return Err(error::VoicevoxSnafu {
-            message: format!(
-                "failed to download {model_url}: HTTP {}",
-                response.status()
-            ),
+            message: format!("failed to download {model_url}: HTTP {}", response.status()),
         }
         .build());
     }
@@ -129,14 +123,13 @@ pub async fn add(repo_id: &str) -> Result<()> {
     std::fs::write(model_dir.join("model.onnx"), &bytes).context(error::IoSnafu)?;
 
     // Try to download config.json if available
-    let config_url = format!(
-        "https://huggingface.co/{repo_id}/resolve/main/config.json"
-    );
+    let config_url = format!("https://huggingface.co/{repo_id}/resolve/main/config.json");
     if let Ok(resp) = client.get(&config_url).send().await
         && resp.status().is_success()
-            && let Ok(config_bytes) = resp.bytes().await {
-                let _ = std::fs::write(model_dir.join("config.json"), &config_bytes);
-            }
+        && let Ok(config_bytes) = resp.bytes().await
+    {
+        let _ = std::fs::write(model_dir.join("config.json"), &config_bytes);
+    }
 
     println!("model saved to: {}", model_dir.display());
     println!("use `kotoba voice set vits:{model_name}` to activate");

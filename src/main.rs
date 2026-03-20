@@ -5,7 +5,6 @@ mod srs;
 mod store;
 
 use clap::Parser;
-
 use cli::{Cli, Command};
 
 #[tokio::main]

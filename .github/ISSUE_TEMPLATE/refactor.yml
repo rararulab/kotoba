@@ -1,0 +1,33 @@
+name: Refactor
+description: Propose a code refactor or technical improvement
+labels: ["refactor"]
+body:
+  - type: textarea
+    id: description
+    attributes:
+      label: Description
+      description: What needs refactoring and why?
+    validations:
+      required: true
+
+  - type: dropdown
+    id: component
+    attributes:
+      label: Component
+      description: Which part of the system is affected?
+      options:
+        - cli (command-line interface)
+        - srs (spaced repetition system)
+        - tts (text-to-speech, VOICEVOX)
+        - db (database, storage)
+        - config (configuration)
+        - ci (CI/CD, build, release)
+        - other
+    validations:
+      required: true
+
+  - type: textarea
+    id: approach
+    attributes:
+      label: Proposed approach
+      description: How would you approach this refactor?
