@@ -8,3 +8,4 @@ pub mod paths;
 pub mod romaji;
 pub mod srs;
 pub mod store;
+pub mod vits;
