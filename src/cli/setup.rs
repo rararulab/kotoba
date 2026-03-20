@@ -1,7 +1,10 @@
 //! `kotoba setup` — download VOICEVOX Engine and initialize environment.
 
-use std::path::PathBuf;
+use std::{io::Write, path::PathBuf};
 
+use futures_util::StreamExt;
+use indicatif::{ProgressBar, ProgressStyle};
+use serde::Serialize;
 use snafu::ResultExt;
 
 use crate::{
@@ -10,6 +13,15 @@ use crate::{
 };
 
 const VOICEVOX_VERSION: &str = "0.22.2";
+
+/// Result of running the setup command.
+#[derive(Debug, Serialize)]
+pub struct SetupResult {
+    /// Path to the database file.
+    pub db_path:            String,
+    /// Whether VOICEVOX Engine is installed after setup.
+    pub voicevox_installed: bool,
+}
 
 fn voicevox_dir() -> Result<PathBuf> {
     let dir = dirs::home_dir()
@@ -50,13 +62,13 @@ pub fn is_voicevox_installed() -> Result<bool> {
 pub fn voicevox_executable() -> Result<PathBuf> { Ok(voicevox_dir()?.join("run")) }
 
 /// Run full setup: download VOICEVOX Engine + initialize DB.
-pub async fn run(db: &Database) -> Result<()> {
-    println!("initializing database...");
+pub async fn run(db: &Database) -> Result<SetupResult> {
+    eprintln!("initializing database...");
     db.init().await?;
-    println!("  database ready at {}", db.path().display());
+    eprintln!("  database ready at {}", db.path().display());
 
     if is_voicevox_installed()? {
-        println!("  voicevox engine already installed");
+        eprintln!("  voicevox engine already installed");
     } else {
         download_voicevox().await?;
     }
@@ -64,16 +76,20 @@ pub async fn run(db: &Database) -> Result<()> {
     db.set_config("tts_backend", "voicevox").await?;
     db.set_config("voicevox_speaker", "1").await?;
 
-    println!("setup complete!");
-    Ok(())
+    eprintln!("setup complete!");
+
+    Ok(SetupResult {
+        db_path:            db.path().display().to_string(),
+        voicevox_installed: is_voicevox_installed()?,
+    })
 }
 
 async fn download_voicevox() -> Result<()> {
     let url = voicevox_download_url();
     let dir = voicevox_dir()?;
 
-    println!("  downloading voicevox engine {VOICEVOX_VERSION}...");
-    println!("  url: {url}");
+    eprintln!("  downloading voicevox engine {VOICEVOX_VERSION}...");
+    eprintln!("  url: {url}");
 
     let client = reqwest::Client::new();
     let response = client.get(&url).send().await.context(error::HttpSnafu)?;
@@ -85,11 +101,33 @@ async fn download_voicevox() -> Result<()> {
         .build());
     }
 
-    let bytes = response.bytes().await.context(error::HttpSnafu)?;
+    let total_size = response.content_length().unwrap_or(0);
+
+    let pb = ProgressBar::new(total_size);
+    pb.set_style(
+        ProgressStyle::default_bar()
+            .template(
+                "{bar:40.cyan/blue} {percent}% {bytes}/{total_bytes}  {bytes_per_sec}  ETA {eta}",
+            )
+            .expect("valid progress bar template")
+            .progress_chars("=>-"),
+    );
 
     let tmp = dir.with_extension("tmp");
     std::fs::create_dir_all(tmp.parent().expect("parent dir")).context(error::IoSnafu)?;
-    std::fs::write(&tmp, &bytes).context(error::IoSnafu)?;
+
+    // Stream the response body to disk in chunks instead of buffering the
+    // entire archive in memory.
+    let mut stream = response.bytes_stream();
+    let mut file = std::fs::File::create(&tmp).context(error::IoSnafu)?;
+
+    while let Some(chunk) = stream.next().await {
+        let chunk = chunk.context(error::HttpSnafu)?;
+        file.write_all(&chunk).context(error::IoSnafu)?;
+        pb.inc(chunk.len() as u64);
+    }
+
+    pb.finish_and_clear();
 
     // Extract .vvpp archive (zip format)
     let file = std::fs::File::open(&tmp).context(error::IoSnafu)?;
@@ -124,6 +162,6 @@ async fn download_voicevox() -> Result<()> {
         }
     }
 
-    println!("  voicevox engine installed at {}", dir.display());
+    eprintln!("  voicevox engine installed at {}", dir.display());
     Ok(())
 }
