@@ -1,4 +1,6 @@
-//! Kokoro ONNX inference module for local text-to-speech synthesis.
+//! Kokoro ONNX inference module for high-quality multi-lingual TTS.
+//!
+//! Pipeline: text → phoneme tokens → ONNX model inference → WAV file.
 
 use std::path::PathBuf;
 
@@ -9,7 +11,7 @@ use snafu::{ResultExt, Snafu};
 #[snafu(visibility(pub))]
 pub enum KokoroError {
     /// Model file not found at the expected path.
-    #[snafu(display("model not found: {path}"))]
+    #[snafu(display("kokoro model not found at {path} — download with `kotoba voice add kokoro`"))]
     ModelNotFound { path: String },
 
     /// ONNX runtime error during session creation or inference.
