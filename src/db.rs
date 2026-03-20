@@ -5,6 +5,13 @@ use std::path::{Path, PathBuf};
 use serde::Serialize;
 use snafu::ResultExt;
 
+/// Convert a SQL COUNT result (`i64`) to `usize`.
+///
+/// SQL COUNT(*) is always non-negative and fits in usize on all platforms.
+fn count_as_usize(n: i64) -> usize {
+    usize::try_from(n).expect("SQL COUNT is non-negative and fits in usize")
+}
+
 use crate::{
     error::{self, Result},
     store::{DBStore, DatabaseConfig},
@@ -57,7 +64,7 @@ pub struct Progress {
 
 fn default_db_dir() -> Result<PathBuf> {
     let dir = dirs::home_dir()
-        .ok_or(error::HomeNotFoundSnafu.build())?
+        .ok_or_else(|| error::HomeNotFoundSnafu.build())?
         .join(".kotoba");
     std::fs::create_dir_all(&dir).context(error::IoSnafu)?;
     Ok(dir)
@@ -79,7 +86,7 @@ impl Database {
     /// Return the database file path.
     pub fn path(&self) -> &Path { &self.path }
 
-    fn pool(&self) -> &sqlx::SqlitePool { self.store.pool() }
+    const fn pool(&self) -> &sqlx::SqlitePool { self.store.pool() }
 
     /// Create all tables and seed default profile values.
     pub async fn init(&self) -> Result<()> {
@@ -95,7 +102,7 @@ impl Database {
         let level = self
             .get_config("current_level")
             .await?
-            .unwrap_or("N5".to_string());
+            .unwrap_or_else(|| "N5".to_string());
         let vocabulary_count = self.count("vocabulary").await?;
         let grammar_count = self.count("grammar").await?;
         let due_reviews = self.due_vocabulary().await?.len() + self.due_grammar().await?.len();
@@ -197,7 +204,7 @@ impl Database {
             .format("%Y-%m-%d %H:%M:%S")
             .to_string();
 
-        let rows: Vec<(String, String, String, Option<String>, Option<f64>)> = sqlx::query_as(
+        let rows: Vec<VocabDueRow> = sqlx::query_as(
             "SELECT v.word, v.reading, v.meaning, r.reviewed_at, r.interval_days FROM vocabulary \
              v LEFT JOIN ( SELECT item_id, reviewed_at, interval_days, ROW_NUMBER() OVER \
              (PARTITION BY item_id ORDER BY reviewed_at DESC) as rn FROM reviews WHERE item_type \
@@ -269,7 +276,7 @@ impl Database {
             .fetch_one(self.pool())
             .await
             .context(error::SqlxSnafu)?;
-        let new = (total_vocabulary + total_grammar).saturating_sub(reviewed_items.0 as usize);
+        let new = (total_vocabulary + total_grammar).saturating_sub(count_as_usize(reviewed_items.0));
 
         let date_filter = if weekly {
             "reviewed_at >= datetime('now', '-7 days')"
@@ -288,7 +295,7 @@ impl Database {
             .mastered(mastered)
             .learning(learning)
             .new(new)
-            .reviews_count(reviews_count.0 as usize)
+            .reviews_count(count_as_usize(reviews_count.0))
             .build())
     }
 
@@ -338,7 +345,7 @@ impl Database {
             .fetch_one(self.pool())
             .await
             .context(error::SqlxSnafu)?;
-        Ok(row.0 as usize)
+        Ok(count_as_usize(row.0))
     }
 
     async fn count_by_mastery(&self, condition: &str) -> Result<usize> {
@@ -350,19 +357,27 @@ impl Database {
         .fetch_one(self.pool())
         .await
         .context(error::SqlxSnafu)?;
-        Ok(row.0 as usize)
+        Ok(count_as_usize(row.0))
     }
 }
+
+/// Row shape returned by the due-vocabulary query.
+type VocabDueRow = (String, String, String, Option<String>, Option<f64>);
 
 fn format_due_at(reviewed_at: Option<&str>, interval: Option<f64>) -> String {
     match (reviewed_at, interval) {
         (Some(ra), Some(iv)) => chrono::NaiveDateTime::parse_from_str(ra, "%Y-%m-%d %H:%M:%S")
-            .map(|dt| {
-                (dt + chrono::Duration::days(iv as i64))
-                    .format("%Y-%m-%d")
-                    .to_string()
-            })
-            .unwrap_or_else(|_| "now".to_string()),
+            .map_or_else(
+                |_| "now".to_string(),
+                |dt| {
+                    // Interval days are small positive values from SRS; truncation is intentional
+                    #[allow(clippy::cast_possible_truncation)]
+                    let days = iv as i64;
+                    (dt + chrono::Duration::days(days))
+                        .format("%Y-%m-%d")
+                        .to_string()
+                },
+            ),
         _ => "now".to_string(),
     }
 }

@@ -39,6 +39,9 @@ jobs:
         with:
           persist-credentials: false
 
+      - name: Install cargo-deny
+        run: cargo install cargo-deny --locked 2>/dev/null || true
+
       - name: Check advisories, licenses, bans
         run: cargo deny check
 

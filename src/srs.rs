@@ -68,6 +68,7 @@ mod tests {
     use super::*;
 
     #[test]
+    #[allow(clippy::float_cmp)] // Exact constants from first_review, no arithmetic drift
     fn first_review_quality_5() {
         let (interval, ease, reps) = first_review(5);
         assert_eq!(interval, 1.0);
