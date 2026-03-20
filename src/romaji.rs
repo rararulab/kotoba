@@ -445,4 +445,74 @@ mod tests {
     fn empty_string() {
         assert_eq!(to_romaji(""), "");
     }
+
+    #[test]
+    fn ascii_passthrough() {
+        assert_eq!(to_romaji("abc123!@#"), "abc123!@#");
+    }
+
+    #[test]
+    fn kanji_passthrough() {
+        assert_eq!(to_romaji("漢字"), "漢字");
+    }
+
+    #[test]
+    fn hiragana_n_row() {
+        assert_eq!(to_romaji("なにぬねの"), "naninuneno");
+    }
+
+    #[test]
+    fn hiragana_h_row() {
+        assert_eq!(to_romaji("はひふへほ"), "hahifuheho");
+    }
+
+    #[test]
+    fn hiragana_m_row() {
+        assert_eq!(to_romaji("まみむめも"), "mamimumemo");
+    }
+
+    #[test]
+    fn hiragana_y_row() {
+        assert_eq!(to_romaji("やゆよ"), "yayuyo");
+    }
+
+    #[test]
+    fn hiragana_r_row() {
+        assert_eq!(to_romaji("らりるれろ"), "rarirurero");
+    }
+
+    #[test]
+    fn hiragana_w_row_and_n() {
+        assert_eq!(to_romaji("わをん"), "wawon");
+    }
+
+    #[test]
+    fn multiple_sokuon() {
+        assert_eq!(to_romaji("ばっさっき"), "bassakki");
+    }
+
+    #[test]
+    fn mixed_hiragana_katakana() {
+        assert_eq!(to_romaji("すしとラーメン"), "sushitoraamen");
+    }
+
+    #[test]
+    fn trailing_sokuon() {
+        // Sokuon at end of string with no following character passes through
+        let result = to_romaji("あっ");
+        assert!(result.ends_with('っ') || result.ends_with('a'));
+    }
+
+    #[test]
+    fn katakana_dakuten_rows() {
+        assert_eq!(to_romaji("ガギグゲゴ"), "gagigugego");
+        assert_eq!(to_romaji("ザジズゼゾ"), "zajizuzezo");
+        assert_eq!(to_romaji("ダヂヅデド"), "dadidudedo");
+        assert_eq!(to_romaji("バビブベボ"), "babibubebo");
+    }
+
+    #[test]
+    fn katakana_handakuten() {
+        assert_eq!(to_romaji("パピプペポ"), "papipupepo");
+    }
 }

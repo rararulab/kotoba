@@ -13,8 +13,20 @@ use cli::{Cli, Command};
 #[tokio::main]
 #[allow(clippy::too_many_lines)]
 async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
+    tracing_subscriber::fmt()
+        .with_env_filter(
+            tracing_subscriber::EnvFilter::from_default_env()
+                .add_directive(tracing::Level::WARN.into()),
+        )
+        .init();
+
     let cli = Cli::parse();
     let db = db::Database::open_default().await?;
+
+    // Ensure DB is initialized for all commands except Init and Setup
+    if !matches!(cli.command, Command::Init | Command::Setup) {
+        db.ensure_initialized().await?;
+    }
 
     match cli.command {
         Command::Init => {

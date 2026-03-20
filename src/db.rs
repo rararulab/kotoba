@@ -94,17 +94,44 @@ impl Database {
         Ok(Self { store, path })
     }
 
+    /// Open a database at a custom path (used for test isolation).
+    #[allow(dead_code)] // used by integration tests via lib.rs
+    pub async fn open_at(path: PathBuf) -> Result<Self> {
+        let url = format!("sqlite:{}?mode=rwc", path.display());
+        let config = DatabaseConfig::builder().build();
+        let store = config.open(&url).await.context(error::StoreSnafu)?;
+        Ok(Self { store, path })
+    }
+
     /// Return the database file path.
     pub fn path(&self) -> &Path { &self.path }
+
+    /// Check that the database has been initialized (vocabulary table exists).
+    ///
+    /// Returns `DatabaseNotInitialized` if the schema has not been created.
+    pub async fn ensure_initialized(&self) -> Result<()> {
+        let row: Option<(String,)> = sqlx::query_as(
+            "SELECT name FROM sqlite_master WHERE type='table' AND name='vocabulary'",
+        )
+        .fetch_optional(self.pool())
+        .await
+        .context(error::SqlxSnafu)?;
+
+        snafu::ensure!(row.is_some(), error::DatabaseNotInitializedSnafu);
+        Ok(())
+    }
 
     const fn pool(&self) -> &sqlx::SqlitePool { self.store.pool() }
 
     /// Create all tables and seed default profile values.
+    #[tracing::instrument(skip(self))]
     pub async fn init(&self) -> Result<()> {
+        tracing::debug!(path = %self.path.display(), "initializing database schema");
         sqlx::raw_sql(include_str!("schema.sql"))
             .execute(self.pool())
             .await
             .context(error::SqlxSnafu)?;
+        tracing::debug!("database schema initialized");
         Ok(())
     }
 
@@ -130,6 +157,7 @@ impl Database {
     ///
     /// Romaji is auto-generated from the reading using kana-to-romaji
     /// conversion.
+    #[tracing::instrument(skip(self))]
     pub async fn add_vocabulary(
         &self,
         word: &str,
@@ -138,6 +166,7 @@ impl Database {
         level: &str,
     ) -> Result<()> {
         let romaji = crate::romaji::to_romaji(reading);
+        tracing::debug!(%romaji, "auto-generated romaji from reading");
         sqlx::query(
             "INSERT OR REPLACE INTO vocabulary (word, reading, romaji, meaning, level) VALUES (?, \
              ?, ?, ?, ?)",
@@ -215,6 +244,7 @@ impl Database {
     }
 
     /// Return vocabulary items due for review.
+    #[tracing::instrument(skip(self))]
     pub async fn due_vocabulary(&self) -> Result<Vec<ReviewItem>> {
         let now = chrono::Utc::now()
             .naive_utc()
@@ -252,6 +282,7 @@ impl Database {
     }
 
     /// Return grammar items due for review.
+    #[tracing::instrument(skip(self))]
     pub async fn due_grammar(&self) -> Result<Vec<ReviewItem>> {
         let now = chrono::Utc::now()
             .naive_utc()
@@ -342,6 +373,7 @@ impl Database {
     }
 
     /// Insert or update a grammar entry.
+    #[tracing::instrument(skip(self))]
     pub async fn add_grammar(
         &self,
         pattern: &str,

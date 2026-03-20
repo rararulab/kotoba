@@ -13,12 +13,14 @@ use crate::{
 };
 
 /// Record a review for a vocabulary word and update SRS state.
+#[tracing::instrument(skip(db))]
 pub async fn record_review(db: &Database, word: &str, quality: u8) -> Result<()> {
     let item_id = db.get_vocabulary_id(word).await?;
     record_review_item(db, item_id, "vocabulary", quality).await
 }
 
 /// Record a review for a grammar pattern and update SRS state.
+#[tracing::instrument(skip(db))]
 pub async fn record_grammar_review(db: &Database, pattern: &str, quality: u8) -> Result<()> {
     let item_id = db.get_grammar_id(pattern).await?;
     record_review_item(db, item_id, "grammar", quality).await
@@ -119,5 +121,63 @@ mod tests {
     fn interval_capped_at_365() {
         let (interval, ..) = next_review(5, 300.0, 2.5, 10);
         assert!(interval <= 365.0);
+    }
+
+    #[test]
+    #[allow(clippy::float_cmp)] // Exact constants from first_review, no arithmetic drift
+    fn first_review_quality_3() {
+        let (interval, ease, reps) = first_review(3);
+        assert_eq!(interval, 0.5);
+        assert_eq!(ease, 2.5);
+        assert_eq!(reps, 1);
+    }
+
+    #[test]
+    fn quality_3_keeps_ease_stable() {
+        let (_, ease, _) = next_review(3, 1.0, 2.5, 1);
+        assert!(
+            (ease - 2.5).abs() < f64::EPSILON,
+            "quality=3 should not change ease"
+        );
+    }
+
+    #[test]
+    fn ease_floor_at_1_3() {
+        // Repeated failures should not push ease below 1.3
+        let (_, ease1, _) = next_review(1, 10.0, 1.5, 5);
+        assert!(ease1 >= 1.3, "ease should not go below 1.3");
+
+        let (_, ease2, _) = next_review(1, 10.0, 1.3, 5);
+        assert!(
+            (ease2 - 1.3).abs() < f64::EPSILON,
+            "ease at floor should stay at 1.3"
+        );
+    }
+
+    #[test]
+    fn ease_ceiling_at_3_0() {
+        // Repeated quality=5 should not push ease above 3.0
+        let (_, ease, _) = next_review(5, 1.0, 2.95, 3);
+        assert!(ease <= 3.0, "ease should not exceed 3.0");
+
+        let (_, ease2, _) = next_review(5, 1.0, 3.0, 3);
+        assert!(
+            (ease2 - 3.0).abs() < f64::EPSILON,
+            "ease at ceiling should stay at 3.0"
+        );
+    }
+
+    #[test]
+    fn multi_review_chain() {
+        // Simulate a chain of successful reviews
+        let (i1, e1, r1) = first_review(5);
+        let (i2, e2, r2) = next_review(5, i1, e1, r1);
+        let (i3, e3, r3) = next_review(5, i2, e2, r2);
+        let (i4, ..) = next_review(5, i3, e3, r3);
+
+        // Intervals should be monotonically increasing
+        assert!(i2 > i1, "second interval should exceed first");
+        assert!(i3 > i2, "third interval should exceed second");
+        assert!(i4 > i3, "fourth interval should exceed third");
     }
 }
