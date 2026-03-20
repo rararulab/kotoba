@@ -20,46 +20,46 @@ use crate::{
 /// Application database wrapping the store layer.
 pub struct Database {
     store: DBStore,
-    path:  PathBuf,
+    path: PathBuf,
 }
 
 /// Current learning status returned by `kotoba status`.
 #[derive(Debug, Serialize, bon::Builder)]
 pub struct Status {
-    pub level:            String,
+    pub level: String,
     pub vocabulary_count: usize,
-    pub grammar_count:    usize,
-    pub due_reviews:      usize,
+    pub grammar_count: usize,
+    pub due_reviews: usize,
 }
 
 /// A vocabulary entry for display or export.
 #[derive(Debug, Serialize)]
 pub struct VocabularyItem {
-    pub word:    String,
+    pub word: String,
     pub reading: String,
     pub meaning: String,
-    pub level:   String,
+    pub level: String,
 }
 
 /// An item due for SRS review.
 #[derive(Debug, Serialize)]
 pub struct ReviewItem {
-    pub word:      String,
-    pub reading:   String,
-    pub meaning:   String,
+    pub word: String,
+    pub reading: String,
+    pub meaning: String,
     pub item_type: String,
-    pub due_at:    String,
+    pub due_at: String,
 }
 
 /// Learning progress statistics.
 #[derive(Debug, Serialize, bon::Builder)]
 pub struct Progress {
     pub total_vocabulary: usize,
-    pub total_grammar:    usize,
-    pub mastered:         usize,
-    pub learning:         usize,
-    pub new:              usize,
-    pub reviews_count:    usize,
+    pub total_grammar: usize,
+    pub mastered: usize,
+    pub learning: usize,
+    pub new: usize,
+    pub reviews_count: usize,
 }
 
 fn default_db_dir() -> Result<PathBuf> {
@@ -84,9 +84,13 @@ impl Database {
     }
 
     /// Return the database file path.
-    pub fn path(&self) -> &Path { &self.path }
+    pub fn path(&self) -> &Path {
+        &self.path
+    }
 
-    const fn pool(&self) -> &sqlx::SqlitePool { self.store.pool() }
+    const fn pool(&self) -> &sqlx::SqlitePool {
+        self.store.pool()
+    }
 
     /// Create all tables and seed default profile values.
     pub async fn init(&self) -> Result<()> {

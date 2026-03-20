@@ -13,7 +13,9 @@ pub struct DatabaseConfig {
     pub max_connections: u32,
 }
 
-const fn default_max_connections() -> u32 { 5 }
+const fn default_max_connections() -> u32 {
+    5
+}
 
 impl DatabaseConfig {
     /// Open a `SQLite` database at the given URL.

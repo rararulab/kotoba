@@ -12,10 +12,14 @@ pub struct DBStore {
 
 impl DBStore {
     /// Create a new store from an existing pool.
-    pub const fn new(pool: SqlitePool) -> Self { Self { pool } }
+    pub const fn new(pool: SqlitePool) -> Self {
+        Self { pool }
+    }
 
     /// Get the underlying `SQLite` pool.
-    pub const fn pool(&self) -> &SqlitePool { &self.pool }
+    pub const fn pool(&self) -> &SqlitePool {
+        &self.pool
+    }
 
     /// Acquire a connection from the pool.
     pub async fn acquire(&self) -> Result<sqlx::pool::PoolConnection<Sqlite>> {
@@ -24,5 +28,7 @@ impl DBStore {
 }
 
 impl From<DBStore> for SqlitePool {
-    fn from(store: DBStore) -> Self { store.pool }
+    fn from(store: DBStore) -> Self {
+        store.pool
+    }
 }
