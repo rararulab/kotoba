@@ -70,9 +70,6 @@ pub enum Command {
     Play {
         /// The word to pronounce
         word: String,
-        /// TTS backend (voicevox or vits)
-        #[arg(long, default_value = "voicevox")]
-        backend: String,
     },
     /// Manage voice models
     Voice {
