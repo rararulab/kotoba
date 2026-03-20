@@ -5,7 +5,8 @@
 
 mod common;
 
-/// Verify status output includes level field for skill to determine blending ratio.
+/// Verify status output includes level field for skill to determine blending
+/// ratio.
 #[tokio::test]
 async fn status_includes_level() {
     let (db, _dir) = common::temp_db().await;
@@ -27,7 +28,8 @@ async fn review_items_include_romaji() {
     assert!(!due[0].meaning.is_empty());
 }
 
-/// Simulate the complete skill call chain: status -> add -> review -> seen -> verify SRS -> config.
+/// Simulate the complete skill call chain: status -> add -> review -> seen ->
+/// verify SRS -> config.
 #[tokio::test]
 async fn full_skill_call_chain() {
     let (db, _dir) = common::temp_db().await;
@@ -62,7 +64,8 @@ async fn full_skill_call_chain() {
     assert_eq!(val, Some("low".to_string()));
 }
 
-/// Verify config set accepts arbitrary keys (skill uses custom keys like blending-intensity).
+/// Verify config set accepts arbitrary keys (skill uses custom keys like
+/// blending-intensity).
 #[tokio::test]
 async fn config_accepts_arbitrary_keys() {
     let (db, _dir) = common::temp_db().await;
@@ -86,7 +89,8 @@ async fn grammar_review_flow() {
     kotoba::srs::record_grammar_review(&db, "～てください", 3)
         .await
         .unwrap();
-    // After quality=3, interval is 0.5 days so item should not be immediately due
+    // After quality=3, interval is 0.5 days so item should not be immediately
+    // due
 }
 
 /// Verify status counts update correctly as skill adds items.
