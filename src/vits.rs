@@ -7,6 +7,7 @@ use std::path::Path;
 use ndarray::Array2;
 use ort::{inputs, session::Session, value::TensorRef};
 use snafu::{ResultExt, Snafu};
+use wana_kana::ConvertJapanese;
 
 /// Errors that can occur during VITS inference.
 #[derive(Debug, Snafu)]
@@ -67,93 +68,19 @@ fn text_to_phoneme_ids(text: &str) -> Vec<i64> {
     ids
 }
 
-/// Map a single kana character to its ASCII phoneme representation.
-///
-/// Returns `None` for characters that need special handling (ASCII passthrough
-/// or unknown characters).
-const fn kana_char_to_phoneme(ch: char) -> Option<&'static str> {
-    // Merge hiragana and katakana by matching both in the same arm.
-    // Katakana codepoints are hiragana + 0x60.
-    match ch {
-        // Vowels
-        '\u{3042}' | '\u{30A2}' => Some("a"),
-        '\u{3044}' | '\u{30A4}' => Some("i"),
-        '\u{3046}' | '\u{30A6}' => Some("u"),
-        '\u{3048}' | '\u{30A8}' => Some("e"),
-        '\u{304A}' | '\u{30AA}' => Some("o"),
-        // K-row
-        '\u{304B}' | '\u{30AB}' => Some("ka"),
-        '\u{304D}' | '\u{30AD}' => Some("ki"),
-        '\u{304F}' | '\u{30AF}' => Some("ku"),
-        '\u{3051}' | '\u{30B1}' => Some("ke"),
-        '\u{3053}' | '\u{30B3}' => Some("ko"),
-        // S-row
-        '\u{3055}' | '\u{30B5}' => Some("sa"),
-        '\u{3057}' | '\u{30B7}' => Some("shi"),
-        '\u{3059}' | '\u{30B9}' => Some("su"),
-        '\u{305B}' | '\u{30BB}' => Some("se"),
-        '\u{305D}' | '\u{30BD}' => Some("so"),
-        // T-row
-        '\u{305F}' | '\u{30BF}' => Some("ta"),
-        '\u{3061}' | '\u{30C1}' => Some("chi"),
-        '\u{3064}' | '\u{30C4}' => Some("tsu"),
-        '\u{3066}' | '\u{30C6}' => Some("te"),
-        '\u{3068}' | '\u{30C8}' => Some("to"),
-        // N-row
-        '\u{306A}' | '\u{30CA}' => Some("na"),
-        '\u{306B}' | '\u{30CB}' => Some("ni"),
-        '\u{306C}' | '\u{30CC}' => Some("nu"),
-        '\u{306D}' | '\u{30CD}' => Some("ne"),
-        '\u{306E}' | '\u{30CE}' => Some("no"),
-        // H-row
-        '\u{306F}' | '\u{30CF}' => Some("ha"),
-        '\u{3072}' | '\u{30D2}' => Some("hi"),
-        '\u{3075}' | '\u{30D5}' => Some("fu"),
-        '\u{3078}' | '\u{30D8}' => Some("he"),
-        '\u{307B}' | '\u{30DB}' => Some("ho"),
-        // M-row
-        '\u{307E}' | '\u{30DE}' => Some("ma"),
-        '\u{307F}' | '\u{30DF}' => Some("mi"),
-        '\u{3080}' | '\u{30E0}' => Some("mu"),
-        '\u{3081}' | '\u{30E1}' => Some("me"),
-        '\u{3082}' | '\u{30E2}' => Some("mo"),
-        // Y-row
-        '\u{3084}' | '\u{30E4}' => Some("ya"),
-        '\u{3086}' | '\u{30E6}' => Some("yu"),
-        '\u{3088}' | '\u{30E8}' => Some("yo"),
-        // R-row
-        '\u{3089}' | '\u{30E9}' => Some("ra"),
-        '\u{308A}' | '\u{30EA}' => Some("ri"),
-        '\u{308B}' | '\u{30EB}' => Some("ru"),
-        '\u{308C}' | '\u{30EC}' => Some("re"),
-        '\u{308D}' | '\u{30ED}' => Some("ro"),
-        // W-row + N
-        '\u{308F}' | '\u{30EF}' => Some("wa"),
-        '\u{3092}' | '\u{30F2}' => Some("wo"),
-        '\u{3093}' | '\u{30F3}' => Some("n"),
-        // Long vowel mark
-        '\u{30FC}' => Some("-"),
-        _ => None,
-    }
-}
-
 /// Convert kana text to ASCII phoneme approximations.
 ///
-/// Maps hiragana and katakana to romaji-like ASCII strings.
-/// Characters that are already ASCII pass through unchanged.
+/// Delegates to `wana_kana` for romaji conversion, then strips the
+/// apostrophe used for ん disambiguation (not needed for phoneme IDs).
+/// Non-kana, non-ASCII characters become spaces.
 fn kana_to_ascii(text: &str) -> String {
-    let mut result = String::new();
-    for ch in text.chars() {
-        if let Some(phoneme) = kana_char_to_phoneme(ch) {
-            result.push_str(phoneme);
-        } else if ch.is_ascii() {
-            result.push(ch);
-        } else {
-            // Unknown non-ASCII characters become space
-            result.push(' ');
-        }
-    }
-    result
+    let romaji = text.to_romaji();
+    // Strip apostrophes (ん disambiguation) — not meaningful for phoneme encoding
+    let stripped = romaji.replace('\'', "");
+    stripped
+        .chars()
+        .map(|ch| if ch.is_ascii() { ch } else { ' ' })
+        .collect()
 }
 
 /// Synthesize speech from kana text using a local VITS ONNX model.
@@ -306,10 +233,12 @@ mod tests {
 
     #[test]
     fn kana_converts_to_ascii() {
-        assert_eq!(kana_to_ascii("\u{3042}"), "a");
-        assert_eq!(kana_to_ascii("\u{304B}"), "ka");
-        assert_eq!(kana_to_ascii("\u{30AB}"), "ka");
+        assert_eq!(kana_to_ascii("あ"), "a");
+        assert_eq!(kana_to_ascii("か"), "ka");
+        assert_eq!(kana_to_ascii("カ"), "ka");
         assert_eq!(kana_to_ascii("hello"), "hello");
+        // Apostrophes from ん disambiguation are stripped for phoneme encoding
+        assert_eq!(kana_to_ascii("おんよみ"), "onyomi");
     }
 
     #[test]
