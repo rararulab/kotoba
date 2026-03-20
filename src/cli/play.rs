@@ -1,10 +1,31 @@
-//! VOICEVOX TTS audio generation and caching.
+//! TTS audio generation and caching with configurable voice backend.
 
 use std::path::PathBuf;
 
 use snafu::ResultExt;
 
+use crate::db::Database;
 use crate::error::{self, Result};
+
+/// Parsed voice configuration specifying backend and speaker/model identifier.
+struct VoiceConfig {
+    backend: String,
+    speaker_id: String,
+}
+
+/// Parse a `backend:id` voice config string (e.g. `voicevox:3`, `vits:model-name`).
+fn parse_voice_config(raw: &str) -> VoiceConfig {
+    match raw.split_once(':') {
+        Some((backend, id)) => VoiceConfig {
+            backend: backend.to_string(),
+            speaker_id: id.to_string(),
+        },
+        None => VoiceConfig {
+            backend: raw.to_string(),
+            speaker_id: "1".to_string(),
+        },
+    }
+}
 
 fn cache_dir() -> Result<PathBuf> {
     let dir = dirs::home_dir()
@@ -15,22 +36,51 @@ fn cache_dir() -> Result<PathBuf> {
     Ok(dir)
 }
 
-/// Generate or return a cached WAV file for a word.
-pub async fn play_word(word: &str, backend: &str) -> Result<PathBuf> {
+/// Generate or return a cached WAV file for a word using the voice configured in the database.
+///
+/// Reads the `voice` key from `user_profile` to determine which TTS backend and speaker to use.
+/// Falls back to `voicevox:1` when no config is set.
+pub async fn play_word(db: &Database, word: &str) -> Result<PathBuf> {
+    let raw_config = db
+        .get_config("voice")
+        .await?
+        .unwrap_or_else(|| "voicevox:1".to_string());
+    let config = parse_voice_config(&raw_config);
+
     let cache = cache_dir()?;
-    let file = cache.join(format!("{word}_{backend}.wav"));
+    let file = cache.join(format!(
+        "{word}_{backend}_{speaker}.wav",
+        backend = config.backend,
+        speaker = config.speaker_id
+    ));
 
     if file.exists() {
         return Ok(file);
     }
 
+    match config.backend.as_str() {
+        "voicevox" => synthesize_voicevox(word, &config.speaker_id, &file).await?,
+        "vits" => synthesize_vits()?,
+        other => {
+            return Err(error::VoicevoxSnafu {
+                message: format!("unknown voice backend: {other}"),
+            }
+            .build());
+        }
+    }
+
+    Ok(file)
+}
+
+/// Synthesize audio via the VOICEVOX engine and write to `out_path`.
+async fn synthesize_voicevox(word: &str, speaker_id: &str, out_path: &PathBuf) -> Result<()> {
     let base_url =
         std::env::var("VOICEVOX_URL").unwrap_or_else(|_| "http://localhost:50021".to_string());
     let client = reqwest::Client::new();
 
     let query: serde_json::Value = client
         .post(format!("{base_url}/audio_query"))
-        .query(&[("text", word), ("speaker", "1")])
+        .query(&[("text", word), ("speaker", speaker_id)])
         .send()
         .await
         .context(error::HttpSnafu)?
@@ -40,7 +90,7 @@ pub async fn play_word(word: &str, backend: &str) -> Result<PathBuf> {
 
     let audio = client
         .post(format!("{base_url}/synthesis"))
-        .query(&[("speaker", "1")])
+        .query(&[("speaker", speaker_id)])
         .json(&query)
         .send()
         .await
@@ -49,6 +99,40 @@ pub async fn play_word(word: &str, backend: &str) -> Result<PathBuf> {
         .await
         .context(error::HttpSnafu)?;
 
-    std::fs::write(&file, &audio).context(error::IoSnafu)?;
-    Ok(file)
+    std::fs::write(out_path, &audio).context(error::IoSnafu)?;
+    Ok(())
+}
+
+/// Placeholder for VITS inference — will be implemented in Issue #12.
+fn synthesize_vits() -> Result<()> {
+    Err(error::VoicevoxSnafu {
+        message: "VITS inference not yet implemented".to_string(),
+    }
+    .build())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parse_voice_config_with_colon() {
+        let config = parse_voice_config("voicevox:3");
+        assert_eq!(config.backend, "voicevox");
+        assert_eq!(config.speaker_id, "3");
+    }
+
+    #[test]
+    fn parse_voice_config_without_colon() {
+        let config = parse_voice_config("voicevox");
+        assert_eq!(config.backend, "voicevox");
+        assert_eq!(config.speaker_id, "1");
+    }
+
+    #[test]
+    fn parse_voice_config_vits() {
+        let config = parse_voice_config("vits:my-model");
+        assert_eq!(config.backend, "vits");
+        assert_eq!(config.speaker_id, "my-model");
+    }
 }

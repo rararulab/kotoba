@@ -46,8 +46,8 @@ async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
             let progress = db.progress(weekly).await?;
             println!("{}", serde_json::to_string_pretty(&progress)?);
         }
-        Command::Play { word, backend } => {
-            let path = cli::play::play_word(&word, &backend).await?;
+        Command::Play { word } => {
+            let path = cli::play::play_word(&db, &word).await?;
             println!("{}", path.display());
         }
         Command::Setup => {

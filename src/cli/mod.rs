@@ -30,19 +30,19 @@ pub enum Command {
     /// Add a new vocabulary word
     Add {
         /// The word (kanji or kana)
-        word:    String,
+        word: String,
         /// Kana reading
         reading: String,
         /// Chinese meaning
         meaning: String,
         /// JLPT level
         #[arg(long, default_value = "N5")]
-        level:   String,
+        level: String,
     },
     /// Record that a word was seen/reviewed
     Seen {
         /// The word
-        word:    String,
+        word: String,
         /// Quality: 1 (forgot), 3 (recognized), 5 (instant recall)
         quality: u8,
     },
@@ -61,10 +61,7 @@ pub enum Command {
     /// Play pronunciation via TTS
     Play {
         /// The word to pronounce
-        word:    String,
-        /// TTS backend (voicevox or vits)
-        #[arg(long, default_value = "voicevox")]
-        backend: String,
+        word: String,
     },
     /// Manage voice models
     Voice {
@@ -74,7 +71,7 @@ pub enum Command {
     /// Set a config value
     Config {
         /// Config key (e.g. blending-intensity)
-        key:   String,
+        key: String,
         /// Config value
         value: String,
     },
