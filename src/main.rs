@@ -11,8 +11,7 @@ use clap::Parser;
 use cli::{Cli, Command};
 
 #[tokio::main]
-#[allow(clippy::too_many_lines)]
-async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
+async fn main() {
     tracing_subscriber::fmt()
         .with_env_filter(
             tracing_subscriber::EnvFilter::from_default_env()
@@ -20,6 +19,18 @@ async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
         )
         .init();
 
+    if let Err(e) = run().await {
+        eprintln!("Error: {e}");
+        println!(
+            "{}",
+            serde_json::json!({"ok": false, "error": e.to_string()})
+        );
+        std::process::exit(1);
+    }
+}
+
+#[allow(clippy::too_many_lines)]
+async fn run() -> std::result::Result<(), Box<dyn std::error::Error>> {
     let cli = Cli::parse();
     let db = db::Database::open_default().await?;
 
@@ -31,7 +42,11 @@ async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
     match cli.command {
         Command::Init => {
             db.init().await?;
-            println!("kotoba initialized at {}", db.path().display());
+            eprintln!("kotoba initialized at {}", db.path().display());
+            println!(
+                "{}",
+                serde_json::json!({"ok": true, "action": "init", "path": db.path().display().to_string()})
+            );
         }
         Command::Status => {
             let status = db.status().await?;
@@ -44,7 +59,11 @@ async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
             level,
         } => {
             db.add_vocabulary(&word, &reading, &meaning, &level).await?;
-            println!("added: {word}({reading}) = {meaning}");
+            eprintln!("added: {word}({reading}) = {meaning}");
+            println!(
+                "{}",
+                serde_json::json!({"ok": true, "action": "add", "word": word, "reading": reading, "meaning": meaning})
+            );
         }
         Command::Grammar { action } => match action {
             cli::GrammarAction::Add {
@@ -55,7 +74,11 @@ async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
             } => {
                 db.add_grammar(&pattern, &meaning, &level, example.as_deref())
                     .await?;
-                println!("added grammar: {pattern} = {meaning}");
+                eprintln!("added grammar: {pattern} = {meaning}");
+                println!(
+                    "{}",
+                    serde_json::json!({"ok": true, "action": "grammar_add", "pattern": pattern, "meaning": meaning})
+                );
             }
             cli::GrammarAction::List { level } => {
                 let items = db.all_grammar(level.as_deref()).await?;
@@ -69,11 +92,15 @@ async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
         } => {
             if grammar {
                 srs::record_grammar_review(&db, &word, quality).await?;
-                println!("recorded grammar review: {word} quality={quality}");
+                eprintln!("recorded grammar review: {word} quality={quality}");
             } else {
                 srs::record_review(&db, &word, quality).await?;
-                println!("recorded review: {word} quality={quality}");
+                eprintln!("recorded review: {word} quality={quality}");
             }
+            println!(
+                "{}",
+                serde_json::json!({"ok": true, "action": "seen", "word": word, "quality": quality, "grammar": grammar})
+            );
         }
         Command::Review { grammar } => {
             let items = if grammar {
@@ -89,10 +116,17 @@ async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
         }
         Command::Play { word } => {
             let path = cli::play::play_word(&db, &word).await?;
-            println!("{}", path.display());
+            println!(
+                "{}",
+                serde_json::json!({"ok": true, "action": "play", "path": path.display().to_string()})
+            );
         }
         Command::Setup => {
-            cli::setup::run(&db).await?;
+            let result = cli::setup::run(&db).await?;
+            println!(
+                "{}",
+                serde_json::json!({"ok": true, "action": "setup", "db_path": result.db_path, "voicevox_installed": result.voicevox_installed})
+            );
         }
         Command::Doctor => {
             cli::doctor::run(&db).await?;
@@ -103,25 +137,46 @@ async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
             }
             cli::VoiceAction::Set { name } => {
                 cli::voice::set(&db, &name).await?;
+                println!(
+                    "{}",
+                    serde_json::json!({"ok": true, "action": "voice_set", "name": name})
+                );
             }
             cli::VoiceAction::Add { repo_id } => {
-                cli::voice::add(&repo_id).await?;
+                let result = cli::voice::add(&repo_id).await?;
+                println!(
+                    "{}",
+                    serde_json::json!({"ok": true, "action": "voice_add", "model": result.model, "path": result.path})
+                );
             }
         },
         Command::Config { action } => match action {
             cli::ConfigAction::Set { key, value } => {
                 db.set_config(&key, &value).await?;
-                println!("set {key} = {value}");
+                eprintln!("set {key} = {value}");
+                println!(
+                    "{}",
+                    serde_json::json!({"ok": true, "action": "config_set", "key": key, "value": value})
+                );
             }
             cli::ConfigAction::Get { key } => {
                 let value = db.get_config(&key).await?;
-                println!("{}", value.as_deref().unwrap_or("(not set)"));
+                let display_value = value.as_deref().unwrap_or("(not set)");
+                println!(
+                    "{}",
+                    serde_json::json!({"ok": true, "action": "config_get", "key": key, "value": display_value})
+                );
             }
             cli::ConfigAction::List => {
                 let entries = db.all_config().await?;
-                for (key, value) in entries {
-                    println!("{key} = {value}");
-                }
+                let map: serde_json::Map<String, serde_json::Value> = entries
+                    .into_iter()
+                    .map(|(k, v)| (k, serde_json::Value::String(v)))
+                    .collect();
+                println!(
+                    "{}",
+                    serde_json::json!({"ok": true, "action": "config_list", "entries": map})
+                );
             }
         },
         Command::Export { format, grammar } => {
