@@ -76,10 +76,29 @@ pub async fn play_word(db: &Database, word: &str) -> Result<PathBuf> {
     Ok(file)
 }
 
+/// Check that the VOICEVOX engine is reachable at the given URL.
+async fn check_voicevox_reachable(base_url: &str) -> Result<()> {
+    let client = reqwest::Client::new();
+    client
+        .get(format!("{base_url}/version"))
+        .send()
+        .await
+        .map_err(|_| {
+            error::VoicevoxNotRunningSnafu {
+                url: base_url.to_string(),
+            }
+            .build()
+        })?;
+    Ok(())
+}
+
 /// Synthesize audio via the VOICEVOX engine and write to `out_path`.
 async fn synthesize_voicevox(word: &str, speaker_id: &str, out_path: &PathBuf) -> Result<()> {
     let base_url =
         std::env::var("VOICEVOX_URL").unwrap_or_else(|_| "http://localhost:50021".to_string());
+
+    check_voicevox_reachable(&base_url).await?;
+
     let client = reqwest::Client::new();
 
     let query: serde_json::Value = client

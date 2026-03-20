@@ -106,6 +106,21 @@ impl Database {
     /// Return the database file path.
     pub fn path(&self) -> &Path { &self.path }
 
+    /// Check that the database has been initialized (vocabulary table exists).
+    ///
+    /// Returns `DatabaseNotInitialized` if the schema has not been created.
+    pub async fn ensure_initialized(&self) -> Result<()> {
+        let row: Option<(String,)> = sqlx::query_as(
+            "SELECT name FROM sqlite_master WHERE type='table' AND name='vocabulary'",
+        )
+        .fetch_optional(self.pool())
+        .await
+        .context(error::SqlxSnafu)?;
+
+        snafu::ensure!(row.is_some(), error::DatabaseNotInitializedSnafu);
+        Ok(())
+    }
+
     const fn pool(&self) -> &sqlx::SqlitePool { self.store.pool() }
 
     /// Create all tables and seed default profile values.
