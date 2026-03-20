@@ -10,9 +10,7 @@ use wana_kana::ConvertJapanese;
 ///
 /// Uses modified Hepburn romanization via `wana_kana`. Non-kana
 /// characters (kanji, ASCII, punctuation) pass through unchanged.
-pub fn to_romaji(kana: &str) -> String {
-    kana.to_romaji()
-}
+pub fn to_romaji(kana: &str) -> String { kana.to_romaji() }
 
 #[cfg(test)]
 mod tests {
