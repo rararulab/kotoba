@@ -1,22 +1,22 @@
 //! `kotoba voice` — manage TTS voice models.
 
-use std::{io::Write, path::PathBuf};
+use std::io::Write;
 
 use futures_util::StreamExt;
 use indicatif::{ProgressBar, ProgressStyle};
 use serde::Serialize;
 use snafu::ResultExt;
 
-use crate::{
-    db::Database,
-    error::{self, Result},
-};
+use crate::error::{self, Result};
 
 /// A voice entry for display.
 #[derive(Debug, Serialize)]
 pub struct VoiceInfo {
+    /// Voice display name.
     pub name:    String,
+    /// Backend identifier.
     pub backend: String,
+    /// Whether this voice is currently active.
     pub active:  bool,
 }
 
@@ -29,21 +29,9 @@ pub struct VoiceAddResult {
     pub path:  String,
 }
 
-fn models_dir() -> Result<PathBuf> {
-    let dir = dirs::home_dir()
-        .ok_or_else(|| error::HomeNotFoundSnafu.build())?
-        .join(".kotoba")
-        .join("models");
-    std::fs::create_dir_all(&dir).context(error::IoSnafu)?;
-    Ok(dir)
-}
-
 /// List available voices.
-pub async fn list(db: &Database) -> Result<()> {
-    let current = db
-        .get_config("voice")
-        .await?
-        .unwrap_or_else(|| "voicevox:1".to_string());
+pub fn list() -> Result<()> {
+    let current = crate::app_config::load().voice.active.clone();
 
     let mut voices: Vec<VoiceInfo> = Vec::new();
 
@@ -71,7 +59,8 @@ pub async fn list(db: &Database) -> Result<()> {
     }
 
     // Downloaded HuggingFace models
-    let models_path = models_dir()?;
+    let models_path = crate::paths::models_dir();
+    std::fs::create_dir_all(&models_path).context(error::IoSnafu)?;
     if let Ok(entries) = std::fs::read_dir(&models_path) {
         for entry in entries.flatten() {
             if entry.path().is_dir() {
@@ -91,16 +80,20 @@ pub async fn list(db: &Database) -> Result<()> {
     Ok(())
 }
 
-/// Set the active voice.
-pub async fn set(db: &Database, name: &str) -> Result<()> {
-    db.set_config("voice", name).await?;
+/// Set the active voice via config file.
+pub fn set(name: &str) -> Result<()> {
+    let mut cfg = crate::app_config::load().clone();
+    cfg.voice.active = name.to_string();
+    crate::app_config::save(&cfg).context(error::IoSnafu)?;
     eprintln!("voice set to: {name}");
     Ok(())
 }
 
 /// Download a voice model from `HuggingFace`.
 pub async fn add(repo_id: &str) -> Result<VoiceAddResult> {
-    let models_path = models_dir()?;
+    let models_path = crate::paths::models_dir();
+    std::fs::create_dir_all(&models_path).context(error::IoSnafu)?;
+
     let model_name = repo_id.split('/').next_back().unwrap_or(repo_id);
     let model_dir = models_path.join(model_name);
 
@@ -115,7 +108,7 @@ pub async fn add(repo_id: &str) -> Result<VoiceAddResult> {
     eprintln!("downloading model from huggingface: {repo_id}...");
 
     // Download model.onnx from HuggingFace
-    let client = reqwest::Client::new();
+    let client = crate::http::client();
     let model_url = format!("https://huggingface.co/{repo_id}/resolve/main/model.onnx");
 
     let response = client

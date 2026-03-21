@@ -6,6 +6,8 @@ version = 2
 ignore = [
     # number_prefix is a transitive dep of indicatif; unmaintained but no security issue
     "RUSTSEC-2025-0119",
+    # rustls-webpki CRL matching issue; transitive dep of reqwest, awaiting upstream fix
+    "RUSTSEC-2026-0049",
 ]
 
 [licenses]

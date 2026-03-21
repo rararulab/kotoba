@@ -92,10 +92,7 @@ fn kana_to_ascii(text: &str) -> String {
 /// The inference runs inside `spawn_blocking` to avoid blocking the
 /// async runtime.
 pub async fn synthesize(model_name: &str, text: &str, output: &Path) -> Result<()> {
-    let home = dirs::home_dir().ok_or_else(|| HomeNotFoundSnafu.build())?;
-    let model_path = home
-        .join(".kotoba")
-        .join("models")
+    let model_path = crate::paths::models_dir()
         .join(model_name)
         .join("model.onnx");
 

@@ -73,19 +73,13 @@ pub struct Progress {
     pub reviews_count:    usize,
 }
 
-fn default_db_dir() -> Result<PathBuf> {
-    let dir = dirs::home_dir()
-        .ok_or_else(|| error::HomeNotFoundSnafu.build())?
-        .join(".kotoba");
-    std::fs::create_dir_all(&dir).context(error::IoSnafu)?;
-    Ok(dir)
-}
-
 impl Database {
     /// Open the default database at `~/.kotoba/kotoba.db`.
     pub async fn open_default() -> Result<Self> {
-        let dir = default_db_dir()?;
-        let path = dir.join("kotoba.db");
+        let path = crate::paths::db_path();
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent).context(error::IoSnafu)?;
+        }
         let url = format!("sqlite:{}?mode=rwc", path.display());
 
         let config = DatabaseConfig::builder().build();
@@ -457,7 +451,8 @@ impl Database {
             .collect())
     }
 
-    /// Set a user profile config value.
+    /// Set a user profile config value (runtime state like level, language).
+    #[allow(dead_code)] // used by integration tests via lib.rs
     pub async fn set_config(&self, key: &str, value: &str) -> Result<()> {
         sqlx::query("INSERT OR REPLACE INTO user_profile (key, value) VALUES (?, ?)")
             .bind(key)
@@ -479,6 +474,7 @@ impl Database {
     }
 
     /// Return all user profile config entries, sorted by key.
+    #[allow(dead_code)] // used by integration tests via lib.rs
     pub async fn all_config(&self) -> Result<Vec<(String, String)>> {
         let rows: Vec<(String, String)> =
             sqlx::query_as("SELECT key, value FROM user_profile ORDER BY key")

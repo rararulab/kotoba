@@ -1,20 +1,20 @@
-//! Integration tests for config set/get/list flow.
+//! Integration tests for DB config (runtime state) and TOML config.
 
 mod common;
 
 #[tokio::test]
 async fn set_get_roundtrip() {
     let (db, _dir) = common::temp_db().await;
-    db.set_config("voice", "vits:test-model")
+    db.set_config("current_level", "N3")
         .await
         .expect("set_config failed");
 
     let value = db
-        .get_config("voice")
+        .get_config("current_level")
         .await
         .expect("get_config failed")
         .expect("should have value");
-    assert_eq!(value, "vits:test-model");
+    assert_eq!(value, "N3");
 }
 
 #[tokio::test]
