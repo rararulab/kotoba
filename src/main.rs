@@ -1,9 +1,13 @@
+mod app_config;
 mod cli;
 mod db;
 mod error;
+mod http;
+mod paths;
 mod romaji;
 mod srs;
 mod store;
+mod tts;
 mod vits;
 
 use clap::Parser;
@@ -114,7 +118,7 @@ async fn run() -> std::result::Result<(), Box<dyn std::error::Error>> {
             println!("{}", serde_json::to_string_pretty(&progress)?);
         }
         Command::Play { word } => {
-            let path = cli::play::play_word(&db, &word).await?;
+            let path = cli::play::play_word(&word).await?;
             println!(
                 "{}",
                 serde_json::json!({"ok": true, "action": "play", "path": path.display().to_string()})
@@ -132,10 +136,10 @@ async fn run() -> std::result::Result<(), Box<dyn std::error::Error>> {
         }
         Command::Voice { action } => match action {
             cli::VoiceAction::List => {
-                cli::voice::list(&db).await?;
+                cli::voice::list()?;
             }
             cli::VoiceAction::Set { name } => {
-                cli::voice::set(&db, &name).await?;
+                cli::voice::set(&name)?;
                 println!(
                     "{}",
                     serde_json::json!({"ok": true, "action": "voice_set", "name": name})
@@ -151,7 +155,9 @@ async fn run() -> std::result::Result<(), Box<dyn std::error::Error>> {
         },
         Command::Config { action } => match action {
             cli::ConfigAction::Set { key, value } => {
-                db.set_config(&key, &value).await?;
+                let mut cfg = app_config::load().clone();
+                set_config_field(&mut cfg, &key, &value);
+                app_config::save(&cfg)?;
                 eprintln!("set {key} = {value}");
                 println!(
                     "{}",
@@ -159,7 +165,8 @@ async fn run() -> std::result::Result<(), Box<dyn std::error::Error>> {
                 );
             }
             cli::ConfigAction::Get { key } => {
-                let value = db.get_config(&key).await?;
+                let cfg = app_config::load();
+                let value = get_config_field(cfg, &key);
                 let display_value = value.as_deref().unwrap_or("(not set)");
                 println!(
                     "{}",
@@ -167,7 +174,8 @@ async fn run() -> std::result::Result<(), Box<dyn std::error::Error>> {
                 );
             }
             cli::ConfigAction::List => {
-                let entries = db.all_config().await?;
+                let cfg = app_config::load();
+                let entries = config_as_map(cfg);
                 let map: serde_json::Map<String, serde_json::Value> = entries
                     .into_iter()
                     .map(|(k, v)| (k, serde_json::Value::String(v)))
@@ -193,4 +201,36 @@ async fn run() -> std::result::Result<(), Box<dyn std::error::Error>> {
     }
 
     Ok(())
+}
+
+/// Set a config field by dotted key path.
+fn set_config_field(cfg: &mut app_config::AppConfig, key: &str, value: &str) {
+    match key {
+        "voice.active" => cfg.voice.active = value.to_string(),
+        "voicevox.version" => cfg.voicevox.version = value.to_string(),
+        "voicevox.url" => cfg.voicevox.url = value.to_string(),
+        "voicevox.speaker" => cfg.voicevox.speaker = value.to_string(),
+        _ => eprintln!("warning: unknown config key: {key}"),
+    }
+}
+
+/// Get a config field by dotted key path.
+fn get_config_field(cfg: &app_config::AppConfig, key: &str) -> Option<String> {
+    match key {
+        "voice.active" => Some(cfg.voice.active.clone()),
+        "voicevox.version" => Some(cfg.voicevox.version.clone()),
+        "voicevox.url" => Some(cfg.voicevox.url.clone()),
+        "voicevox.speaker" => Some(cfg.voicevox.speaker.clone()),
+        _ => None,
+    }
+}
+
+/// Flatten config into key-value pairs for listing.
+fn config_as_map(cfg: &app_config::AppConfig) -> Vec<(String, String)> {
+    vec![
+        ("voice.active".to_string(), cfg.voice.active.clone()),
+        ("voicevox.version".to_string(), cfg.voicevox.version.clone()),
+        ("voicevox.url".to_string(), cfg.voicevox.url.clone()),
+        ("voicevox.speaker".to_string(), cfg.voicevox.speaker.clone()),
+    ]
 }

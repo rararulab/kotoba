@@ -7,15 +7,20 @@ use crate::{cli::setup, db::Database, error::Result};
 /// Health check result for a single component.
 #[derive(Debug, Serialize)]
 pub struct Check {
+    /// Component name.
     pub name:   String,
+    /// Status: "ok", "error", "missing", or "`not_running`".
     pub status: String,
+    /// Human-readable detail.
     pub detail: String,
 }
 
 /// Full doctor report.
 #[derive(Debug, Serialize)]
 pub struct Report {
+    /// Individual check results.
     pub checks:  Vec<Check>,
+    /// True if all checks passed.
     pub healthy: bool,
 }
 
@@ -68,41 +73,35 @@ async fn check_database(db: &Database) -> Check {
 }
 
 fn check_voicevox_installed() -> Check {
-    match setup::is_voicevox_installed() {
-        Ok(true) => Check {
+    if setup::is_voicevox_installed() {
+        Check {
             name:   "voicevox_installed".to_string(),
             status: "ok".to_string(),
-            detail: setup::voicevox_executable()
-                .map_or_else(|_| "unknown path".to_string(), |p| p.display().to_string()),
-        },
-        _ => Check {
+            detail: crate::paths::voicevox_executable().display().to_string(),
+        }
+    } else {
+        Check {
             name:   "voicevox_installed".to_string(),
             status: "missing".to_string(),
             detail: "run `kotoba setup` to install".to_string(),
-        },
+        }
     }
 }
 
 async fn check_voicevox_api() -> Check {
-    let base_url =
-        std::env::var("VOICEVOX_URL").unwrap_or_else(|_| "http://localhost:50021".to_string());
+    // Env var overrides config
+    let base_url = std::env::var("VOICEVOX_URL")
+        .unwrap_or_else(|_| crate::app_config::load().voicevox.url.clone());
 
-    let client = reqwest::Client::builder()
+    let client = crate::http::client();
+
+    // Use a per-request timeout for the doctor check (short timeout)
+    match client
+        .get(format!("{base_url}/version"))
         .timeout(std::time::Duration::from_secs(3))
-        .build();
-
-    let client = match client {
-        Ok(c) => c,
-        Err(e) => {
-            return Check {
-                name:   "voicevox_api".to_string(),
-                status: "error".to_string(),
-                detail: format!("http client error: {e}"),
-            };
-        }
-    };
-
-    match client.get(format!("{base_url}/version")).send().await {
+        .send()
+        .await
+    {
         Ok(resp) if resp.status().is_success() => {
             let version = resp.text().await.unwrap_or_else(|_| "unknown".to_string());
             Check {
@@ -125,47 +124,31 @@ async fn check_voicevox_api() -> Check {
 }
 
 fn check_audio_cache() -> Check {
-    let dir = dirs::home_dir().map(|h| h.join(".kotoba").join("audio"));
+    let dir = crate::paths::audio_cache_dir();
 
-    match dir {
-        Some(d) if d.exists() => {
-            let count = std::fs::read_dir(&d)
-                .map(std::iter::Iterator::count)
-                .unwrap_or(0);
-            Check {
-                name:   "audio_cache".to_string(),
-                status: "ok".to_string(),
-                detail: format!("{} cached files at {}", count, d.display()),
-            }
-        }
-        Some(d) => Check {
+    if dir.exists() {
+        let count = std::fs::read_dir(&dir)
+            .map(std::iter::Iterator::count)
+            .unwrap_or(0);
+        Check {
             name:   "audio_cache".to_string(),
             status: "ok".to_string(),
-            detail: format!("not created yet (will be at {})", d.display()),
-        },
-        None => Check {
+            detail: format!("{count} cached files at {}", dir.display()),
+        }
+    } else {
+        Check {
             name:   "audio_cache".to_string(),
-            status: "error".to_string(),
-            detail: "home directory not found".to_string(),
-        },
+            status: "ok".to_string(),
+            detail: format!("not created yet (will be at {})", dir.display()),
+        }
     }
 }
 
 fn check_disk_space() -> Check {
-    let home = dirs::home_dir().map(|h| h.join(".kotoba"));
-    home.map_or_else(
-        || Check {
-            name:   "disk_space".to_string(),
-            status: "error".to_string(),
-            detail: "home directory not found".to_string(),
-        },
-        |p| {
-            let path = p.display().to_string();
-            Check {
-                name:   "disk_space".to_string(),
-                status: "ok".to_string(),
-                detail: format!("data dir: {path}"),
-            }
-        },
-    )
+    let dir = crate::paths::data_dir();
+    Check {
+        name:   "disk_space".to_string(),
+        status: "ok".to_string(),
+        detail: format!("data dir: {}", dir.display()),
+    }
 }

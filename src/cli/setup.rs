@@ -1,6 +1,6 @@
 //! `kotoba setup` — download VOICEVOX Engine and initialize environment.
 
-use std::{io::Write, path::PathBuf};
+use std::io::Write;
 
 use futures_util::StreamExt;
 use indicatif::{ProgressBar, ProgressStyle};
@@ -13,8 +13,6 @@ use crate::{
     error::{self, Result},
 };
 
-const VOICEVOX_VERSION: &str = "0.22.2";
-
 /// Result of running the setup command.
 #[derive(Debug, Serialize)]
 pub struct SetupResult {
@@ -22,14 +20,6 @@ pub struct SetupResult {
     pub db_path:            String,
     /// Whether VOICEVOX Engine is installed after setup.
     pub voicevox_installed: bool,
-}
-
-fn voicevox_dir() -> Result<PathBuf> {
-    let dir = dirs::home_dir()
-        .ok_or_else(|| error::HomeNotFoundSnafu.build())?
-        .join(".kotoba")
-        .join("voicevox");
-    Ok(dir)
 }
 
 fn voicevox_download_url(version: &str) -> String {
@@ -54,13 +44,10 @@ fn voicevox_download_url(version: &str) -> String {
 }
 
 /// Check if VOICEVOX Engine is already installed.
-pub fn is_voicevox_installed() -> Result<bool> {
-    let dir = voicevox_dir()?;
-    Ok(dir.exists() && dir.join("run").exists())
+pub fn is_voicevox_installed() -> bool {
+    let dir = crate::paths::voicevox_dir();
+    dir.exists() && dir.join("run").exists()
 }
-
-/// Get the path to the VOICEVOX Engine executable.
-pub fn voicevox_executable() -> Result<PathBuf> { Ok(voicevox_dir()?.join("run")) }
 
 /// Run full setup: download VOICEVOX Engine + initialize DB.
 pub async fn run(db: &Database) -> Result<SetupResult> {
@@ -68,42 +55,30 @@ pub async fn run(db: &Database) -> Result<SetupResult> {
     db.init().await?;
     eprintln!("  database ready at {}", db.path().display());
 
-    let version = db
-        .get_config("voicevox_version")
-        .await?
-        .unwrap_or_else(|| VOICEVOX_VERSION.to_string());
+    let version = crate::app_config::load().voicevox.version.clone();
 
-    if is_voicevox_installed()? {
+    if is_voicevox_installed() {
         eprintln!("  voicevox engine already installed");
     } else {
         download_voicevox(&version).await?;
-    }
-
-    // Only set voice defaults if not already configured, so re-running setup
-    // does not overwrite user customizations.
-    if db.get_config("tts_backend").await?.is_none() {
-        db.set_config("tts_backend", "voicevox").await?;
-    }
-    if db.get_config("voicevox_speaker").await?.is_none() {
-        db.set_config("voicevox_speaker", "1").await?;
     }
 
     eprintln!("setup complete!");
 
     Ok(SetupResult {
         db_path:            db.path().display().to_string(),
-        voicevox_installed: is_voicevox_installed()?,
+        voicevox_installed: is_voicevox_installed(),
     })
 }
 
 async fn download_voicevox(version: &str) -> Result<()> {
     let url = voicevox_download_url(version);
-    let dir = voicevox_dir()?;
+    let dir = crate::paths::voicevox_dir();
 
     eprintln!("  downloading voicevox engine {version}...");
     eprintln!("  url: {url}");
 
-    let client = reqwest::Client::new();
+    let client = crate::http::client();
     let response = client.get(&url).send().await.context(error::HttpSnafu)?;
 
     if !response.status().is_success() {
@@ -144,12 +119,12 @@ async fn download_voicevox(version: &str) -> Result<()> {
 
     // Verify the download against the SHA256 sidecar file
     let actual_hash = format!("{:x}", hasher.finalize());
-    verify_against_sidecar(&client, &url, &actual_hash, &tmp).await?;
+    verify_against_sidecar(client, &url, &actual_hash, &tmp).await?;
 
     // Extract .vvpp archive (zip format)
     let file = std::fs::File::open(&tmp).context(error::IoSnafu)?;
     let mut archive = zip::ZipArchive::new(file).map_err(|e| {
-        error::VoicevoxSnafu {
+        error::ZipSnafu {
             message: format!("failed to open archive: {e}"),
         }
         .build()
@@ -157,7 +132,7 @@ async fn download_voicevox(version: &str) -> Result<()> {
 
     std::fs::create_dir_all(&dir).context(error::IoSnafu)?;
     archive.extract(&dir).map_err(|e| {
-        error::VoicevoxSnafu {
+        error::ZipSnafu {
             message: format!("failed to extract archive: {e}"),
         }
         .build()
@@ -189,7 +164,7 @@ async fn verify_against_sidecar(
     client: &reqwest::Client,
     asset_url: &str,
     actual_hash: &str,
-    downloaded_file: &PathBuf,
+    downloaded_file: &std::path::Path,
 ) -> Result<()> {
     let sidecar_url = format!("{asset_url}.txt");
     eprintln!("  verifying checksum...");

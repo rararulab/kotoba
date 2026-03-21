@@ -52,6 +52,9 @@ pub enum KotobaError {
 
     #[snafu(display("checksum mismatch: expected {expected}, got {actual}"))]
     ChecksumMismatch { expected: String, actual: String },
+
+    #[snafu(display("zip error: {message}"))]
+    Zip { message: String },
 }
 
 pub type Result<T> = std::result::Result<T, KotobaError>;
