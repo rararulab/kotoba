@@ -5,11 +5,9 @@
 //! - 3 — user understands word in context
 //! - 1 — user misuses word or asks what it means again
 
-use snafu::ensure;
-
 use crate::{
     db::Database,
-    error::{self, Result},
+    error::Result,
 };
 
 /// Record a review for a vocabulary word and update SRS state.
@@ -33,11 +31,6 @@ async fn record_review_item(
     item_type: &str,
     quality: u8,
 ) -> Result<()> {
-    ensure!(
-        matches!(quality, 1 | 3 | 5),
-        error::InvalidQualitySnafu { value: quality }
-    );
-
     let prev = db.get_latest_review(item_id, item_type).await?;
 
     let (interval, ease, reps) = prev.map_or_else(

@@ -61,7 +61,8 @@ async fn run() -> std::result::Result<(), Box<dyn std::error::Error>> {
             meaning,
             level,
         } => {
-            db.add_vocabulary(&word, &reading, &meaning, &level).await?;
+            let level_str = level.to_string();
+            db.add_vocabulary(&word, &reading, &meaning, &level_str).await?;
             eprintln!("added: {word}({reading}) = {meaning}");
             println!(
                 "{}",
@@ -75,7 +76,8 @@ async fn run() -> std::result::Result<(), Box<dyn std::error::Error>> {
                 level,
                 example,
             } => {
-                db.add_grammar(&pattern, &meaning, &level, example.as_deref())
+                let level_str = level.to_string();
+                db.add_grammar(&pattern, &meaning, &level_str, example.as_deref())
                     .await?;
                 eprintln!("added grammar: {pattern} = {meaning}");
                 println!(
@@ -84,7 +86,8 @@ async fn run() -> std::result::Result<(), Box<dyn std::error::Error>> {
                 );
             }
             cli::GrammarAction::List { level } => {
-                let items = db.all_grammar(level.as_deref()).await?;
+                let level_str = level.as_ref().map(std::string::ToString::to_string);
+                let items = db.all_grammar(level_str.as_deref()).await?;
                 println!("{}", serde_json::to_string_pretty(&items)?);
             }
         },
@@ -93,16 +96,17 @@ async fn run() -> std::result::Result<(), Box<dyn std::error::Error>> {
             quality,
             grammar,
         } => {
+            let q = quality.as_u8();
             if grammar {
-                srs::record_grammar_review(&db, &word, quality).await?;
-                eprintln!("recorded grammar review: {word} quality={quality}");
+                srs::record_grammar_review(&db, &word, q).await?;
+                eprintln!("recorded grammar review: {word} quality={q}");
             } else {
-                srs::record_review(&db, &word, quality).await?;
-                eprintln!("recorded review: {word} quality={quality}");
+                srs::record_review(&db, &word, q).await?;
+                eprintln!("recorded review: {word} quality={q}");
             }
             println!(
                 "{}",
-                serde_json::json!({"ok": true, "action": "seen", "word": word, "quality": quality, "grammar": grammar})
+                serde_json::json!({"ok": true, "action": "seen", "word": word, "quality": q, "grammar": grammar})
             );
         }
         Command::Review { grammar } => {
@@ -192,11 +196,12 @@ async fn run() -> std::result::Result<(), Box<dyn std::error::Error>> {
             }
         },
         Command::List { grammar, level } => {
+            let level_str = level.as_ref().map(std::string::ToString::to_string);
             if grammar {
-                let items = db.all_grammar(level.as_deref()).await?;
+                let items = db.all_grammar(level_str.as_deref()).await?;
                 println!("{}", serde_json::to_string_pretty(&items)?);
             } else {
-                let items = db.all_vocabulary(level.as_deref()).await?;
+                let items = db.all_vocabulary(level_str.as_deref()).await?;
                 println!("{}", serde_json::to_string_pretty(&items)?);
             }
         }

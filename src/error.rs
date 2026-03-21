@@ -17,9 +17,6 @@ pub enum KotobaError {
     #[snafu(display("grammar not found: {pattern}"))]
     GrammarNotFound { pattern: String },
 
-    #[snafu(display("invalid quality rating: {value} (must be 1, 3, or 5)"))]
-    InvalidQuality { value: u8 },
-
     #[snafu(display("home directory not found"))]
     HomeNotFound,
 
@@ -34,9 +31,6 @@ pub enum KotobaError {
 
     #[snafu(display("JSON error: {source}"))]
     Json { source: serde_json::Error },
-
-    #[snafu(display("unknown export format: {format} (use json, csv, or anki)"))]
-    UnknownFormat { format: String },
 
     #[snafu(display("database not initialized — run `kotoba init` first"))]
     DatabaseNotInitialized,
