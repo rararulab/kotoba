@@ -3,7 +3,6 @@ mod cli;
 mod db;
 mod error;
 mod http;
-#[allow(dead_code)]
 mod kokoro;
 mod paths;
 mod romaji;
