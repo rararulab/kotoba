@@ -31,6 +31,12 @@ async fn record_review_item(
     item_type: &str,
     quality: u8,
 ) -> Result<()> {
+    // Quality is enforced by clap at parse time; assert here to catch internal misuse
+    debug_assert!(
+        matches!(quality, 1 | 3 | 5),
+        "invalid quality {quality}: must be 1, 3, or 5"
+    );
+
     let prev = db.get_latest_review(item_id, item_type).await?;
 
     let (interval, ease, reps) = prev.map_or_else(
