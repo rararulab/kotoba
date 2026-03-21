@@ -64,10 +64,9 @@ fn tokenize(text: &str, lang: &str) -> Vec<i64> {
     ids
 }
 
-/// Return the directory where Kokoro models are stored (`~/.kotoba/models/kokoro`).
-fn models_dir() -> PathBuf {
-    crate::paths::models_dir().join("kokoro")
-}
+/// Return the directory where Kokoro models are stored
+/// (`~/.kotoba/models/kokoro`).
+fn models_dir() -> PathBuf { crate::paths::models_dir().join("kokoro") }
 
 /// Synthesize speech from text using the local Kokoro ONNX model.
 ///
@@ -103,12 +102,7 @@ pub async fn synthesize(text: &str, lang: &str, voice: &str, output: &Path) -> R
 /// `voices-v1.0.bin` is pending model format investigation. The ONNX
 /// tensor names (`tokens`, `token_lengths`) also need verification
 /// against the actual Kokoro v1.0 model. See plan open questions #1-2.
-fn run_inference(
-    model_path: &Path,
-    tokens: &[i64],
-    _voice: &str,
-    output: &Path,
-) -> Result<()> {
+fn run_inference(model_path: &Path, tokens: &[i64], _voice: &str, output: &Path) -> Result<()> {
     let mut session = Session::builder()
         .context(OnnxRuntimeSnafu)?
         .commit_from_file(model_path)
@@ -139,7 +133,8 @@ fn run_inference(
     write_wav(output, audio_data, 24000) // Kokoro uses 24 kHz
 }
 
-/// Write raw f32 audio samples to a 16-bit PCM WAV file at the given sample rate.
+/// Write raw f32 audio samples to a 16-bit PCM WAV file at the given sample
+/// rate.
 ///
 /// Format: mono, 16-bit signed integer PCM.
 /// Samples are clamped to `[-1.0, 1.0]` before conversion.
@@ -194,7 +189,10 @@ mod tests {
     #[test]
     fn tokenize_japanese_kana() {
         let tokens = tokenize("こんにちは", "ja");
-        assert!(!tokens.is_empty(), "should produce tokens for Japanese kana");
+        assert!(
+            !tokens.is_empty(),
+            "should produce tokens for Japanese kana"
+        );
         assert!(tokens.iter().all(|&t| t >= 0));
     }
 
