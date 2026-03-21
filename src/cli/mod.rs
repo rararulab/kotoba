@@ -2,6 +2,7 @@
 
 pub mod doctor;
 pub mod export;
+pub mod huggingface;
 pub mod play;
 pub mod setup;
 pub mod voice;
@@ -71,10 +72,15 @@ pub enum Command {
         /// The word to pronounce
         word: String,
     },
-    /// Manage voice models
+    /// Manage TTS voice selection
     Voice {
         #[command(subcommand)]
         action: VoiceAction,
+    },
+    /// Download and manage ONNX models from `HuggingFace`
+    Huggingface {
+        #[command(subcommand)]
+        action: HuggingFaceAction,
     },
     /// Manage config values
     Config {
@@ -153,9 +159,16 @@ pub enum VoiceAction {
         /// Voice name or ID
         name: String,
     },
-    /// Download a voice model from `HuggingFace`
+}
+
+/// `HuggingFace` model management subcommands.
+#[derive(Subcommand)]
+pub enum HuggingFaceAction {
+    /// Download an ONNX model from `HuggingFace`
     Add {
         /// `HuggingFace` repo ID (e.g. username/model-name)
         repo_id: String,
     },
+    /// List downloaded `HuggingFace` models
+    List,
 }
