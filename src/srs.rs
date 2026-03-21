@@ -5,10 +5,7 @@
 //! - 3 — user understands word in context
 //! - 1 — user misuses word or asks what it means again
 
-use crate::{
-    db::Database,
-    error::Result,
-};
+use crate::{db::Database, error::Result};
 
 /// Record a review for a vocabulary word and update SRS state.
 #[tracing::instrument(skip(db))]
@@ -31,7 +28,8 @@ async fn record_review_item(
     item_type: &str,
     quality: u8,
 ) -> Result<()> {
-    // Quality is enforced by clap at parse time; assert here to catch internal misuse
+    // Quality is enforced by clap at parse time; assert here to catch internal
+    // misuse
     debug_assert!(
         matches!(quality, 1 | 3 | 5),
         "invalid quality {quality}: must be 1, 3, or 5"

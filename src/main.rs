@@ -62,7 +62,8 @@ async fn run() -> std::result::Result<(), Box<dyn std::error::Error>> {
             level,
         } => {
             let level_str = level.to_string();
-            db.add_vocabulary(&word, &reading, &meaning, &level_str).await?;
+            db.add_vocabulary(&word, &reading, &meaning, &level_str)
+                .await?;
             eprintln!("added: {word}({reading}) = {meaning}");
             println!(
                 "{}",
