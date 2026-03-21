@@ -98,6 +98,11 @@ pub async fn synthesize(text: &str, lang: &str, voice: &str, output: &Path) -> R
 ///
 /// Creates input tensors (token IDs, lengths), runs the model,
 /// and writes the output audio to a WAV file.
+///
+/// NOTE: `_voice` is currently unused — voice embedding loading from
+/// `voices-v1.0.bin` is pending model format investigation. The ONNX
+/// tensor names (`tokens`, `token_lengths`) also need verification
+/// against the actual Kokoro v1.0 model. See plan open questions #1-2.
 fn run_inference(
     model_path: &Path,
     tokens: &[i64],
