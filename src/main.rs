@@ -7,6 +7,7 @@ mod http;
 mod kokoro;
 mod paths;
 mod romaji;
+mod rvc;
 mod srs;
 mod store;
 mod tts;

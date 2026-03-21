@@ -58,6 +58,14 @@ pub enum KotobaError {
 
     #[snafu(display("Kokoro TTS error: {message}"))]
     Kokoro { message: String },
+
+    #[snafu(display("RVC error: {message}"))]
+    Rvc { message: String },
+
+    #[snafu(display(
+        "RVC sidecar not running at {url} — start with `cd rvc-sidecar && python server.py`"
+    ))]
+    RvcNotRunning { url: String },
 }
 
 pub type Result<T> = std::result::Result<T, KotobaError>;
