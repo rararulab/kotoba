@@ -43,7 +43,13 @@ pub async fn run(db: &Database) -> Result<()> {
     // 5. Kokoro model
     checks.push(check_kokoro_model());
 
-    // 6. Disk space
+    // 6. RVC sidecar reachability
+    checks.push(check_rvc_sidecar().await);
+
+    // 7. RVC models
+    checks.push(check_rvc_models());
+
+    // 8. Disk space
     checks.push(check_disk_space());
 
     let healthy = checks.iter().all(|c| c.status == "ok");
@@ -166,6 +172,44 @@ fn check_kokoro_model() -> Check {
             status: "error".to_string(),
             detail: "home directory not found".to_string(),
         },
+    }
+}
+
+async fn check_rvc_sidecar() -> Check {
+    let rvc_url = crate::rvc::rvc_base_url();
+
+    match crate::rvc::check_reachable().await {
+        Ok(()) => Check {
+            name:   "rvc_sidecar".to_string(),
+            status: "ok".to_string(),
+            detail: format!("running at {rvc_url}"),
+        },
+        Err(_) => Check {
+            name:   "rvc_sidecar".to_string(),
+            status: "not_running".to_string(),
+            detail: "not running (optional — needed for anime character voices)".to_string(),
+        },
+    }
+}
+
+fn check_rvc_models() -> Check {
+    let rvc_dir = crate::paths::models_dir().join("rvc");
+
+    if rvc_dir.exists() {
+        let count = std::fs::read_dir(&rvc_dir)
+            .map(|entries| entries.flatten().filter(|e| e.path().is_dir()).count())
+            .unwrap_or(0);
+        Check {
+            name:   "rvc_models".to_string(),
+            status: "ok".to_string(),
+            detail: format!("{count} installed"),
+        }
+    } else {
+        Check {
+            name:   "rvc_models".to_string(),
+            status: "ok".to_string(),
+            detail: "none (optional — add with `kotoba huggingface add rvc:<repo>`)".to_string(),
+        }
     }
 }
 

@@ -9,8 +9,8 @@ use snafu::ResultExt;
 
 use crate::error::{self, Result};
 
-/// Get the RVC sidecar base URL from env or default.
-fn rvc_base_url() -> String {
+/// Return the RVC sidecar base URL (`RVC_URL` env var, or `http://localhost:50022`).
+pub fn rvc_base_url() -> String {
     std::env::var("RVC_URL").unwrap_or_else(|_| "http://localhost:50022".to_string())
 }
 
