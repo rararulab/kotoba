@@ -65,10 +65,8 @@ pub enum KotobaError {
     #[snafu(display("download failed for {url}: HTTP {status}"))]
     DownloadFailed { url: String, status: String },
 
-    #[snafu(display(
-        "RVC sidecar not running at {url} — start with `cd rvc-sidecar && python server.py`"
-    ))]
-    RvcNotRunning { url: String },
+    #[snafu(display("rvc_python not installed — run `pip install rvc-python`"))]
+    RvcNotInstalled,
 }
 
 pub type Result<T> = std::result::Result<T, KotobaError>;

@@ -1,7 +1,8 @@
-//! RVC v2 voice conversion client.
+//! RVC v2 voice conversion via subprocess.
 //!
-//! Communicates with the RVC sidecar service to convert
-//! base TTS audio into anime character voices.
+//! Calls `rvc_python` CLI to convert base TTS audio into
+//! anime character voices. Users must install it with
+//! `pip install rvc-python`.
 
 use std::path::Path;
 
@@ -9,66 +10,70 @@ use snafu::ResultExt;
 
 use crate::error::{self, Result};
 
-/// Return the RVC sidecar base URL (`RVC_URL` env var, or `http://localhost:50022`).
-pub fn rvc_base_url() -> String {
-    std::env::var("RVC_URL").unwrap_or_else(|_| "http://localhost:50022".to_string())
-}
-
-/// Check that the RVC sidecar is reachable.
-pub async fn check_reachable() -> Result<()> {
-    let url = rvc_base_url();
-    crate::http::client()
-        .get(format!("{url}/version"))
-        .timeout(std::time::Duration::from_secs(3))
-        .send()
+/// Check that `rvc_python` is installed and importable.
+pub async fn check_installed() -> Result<()> {
+    let output = tokio::process::Command::new("python3")
+        .args(["-c", "import rvc_python"])
+        .output()
         .await
-        .map_err(|_| error::RvcNotRunningSnafu { url: url.clone() }.build())?;
+        .context(error::IoSnafu)?;
+
+    if !output.status.success() {
+        return Err(error::RvcNotInstalledSnafu.build());
+    }
     Ok(())
 }
 
 /// Convert audio at `input_path` using the given RVC model,
 /// writing the result to `output_path`.
+///
+/// Spawns `rvc_cli infer` as a subprocess with the model located
+/// at `~/.kotoba/models/rvc/{model}/model.pth`.
 pub async fn convert(input_path: &Path, model: &str, output_path: &Path) -> Result<()> {
-    let url = rvc_base_url();
-    let client = crate::http::client();
+    let model_dir = crate::paths::models_dir().join("rvc").join(model);
+    let model_pth = model_dir.join("model.pth");
 
-    let input_bytes = std::fs::read(input_path).context(error::IoSnafu)?;
-
-    let part = reqwest::multipart::Part::bytes(input_bytes)
-        .file_name("input.wav")
-        .mime_str("audio/wav")
-        .expect("valid mime type");
-
-    let form = reqwest::multipart::Form::new().part("file", part);
-
-    let response = client
-        .post(format!("{url}/convert"))
-        .query(&[("model", model)])
-        .multipart(form)
-        .send()
-        .await
-        .context(error::HttpSnafu)?;
-
-    if !response.status().is_success() {
+    if !model_pth.exists() {
         return Err(error::RvcSnafu {
-            message: format!("RVC conversion failed: HTTP {}", response.status()),
+            message: format!(
+                "model not found: {model} — download with `kotoba huggingface add rvc:<repo>`"
+            ),
         }
         .build());
     }
 
-    let audio = response.bytes().await.context(error::HttpSnafu)?;
-    std::fs::write(output_path, &audio).context(error::IoSnafu)?;
+    let mut cmd = tokio::process::Command::new("rvc_cli");
+    cmd.args(["infer", "-i"])
+        .arg(input_path)
+        .args(["-o"])
+        .arg(output_path)
+        .args(["-mp"])
+        .arg(&model_pth);
+
+    // Use index file if available for better voice quality
+    let index_path = model_dir.join("model.index");
+    if index_path.exists() {
+        cmd.args(["-ip"]).arg(&index_path);
+    }
+
+    let output = cmd.output().await.context(error::IoSnafu)?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        return Err(error::RvcSnafu {
+            message: format!("rvc_cli infer failed: {stderr}"),
+        }
+        .build());
+    }
+
     Ok(())
 }
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-
     #[test]
-    fn rvc_url_default() {
-        let url = rvc_base_url();
-        assert!(url.starts_with("http"));
-        assert!(url.contains("50022"));
+    fn rvc_model_path_resolves() {
+        let dir = crate::paths::models_dir().join("rvc").join("test-model");
+        assert!(dir.ends_with("rvc/test-model"));
     }
 }

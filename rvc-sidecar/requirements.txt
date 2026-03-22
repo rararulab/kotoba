@@ -1,4 +1,0 @@
-fastapi==0.115.*
-uvicorn[standard]==0.34.*
-soundfile>=0.13
-numpy>=1.26

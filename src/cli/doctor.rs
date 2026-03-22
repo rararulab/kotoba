@@ -43,8 +43,8 @@ pub async fn run(db: &Database) -> Result<()> {
     // 5. Kokoro model
     checks.push(check_kokoro_model());
 
-    // 6. RVC sidecar reachability
-    checks.push(check_rvc_sidecar().await);
+    // 6. RVC Python
+    checks.push(check_rvc_python().await);
 
     // 7. RVC models
     checks.push(check_rvc_models());
@@ -175,19 +175,19 @@ fn check_kokoro_model() -> Check {
     }
 }
 
-async fn check_rvc_sidecar() -> Check {
-    let rvc_url = crate::rvc::rvc_base_url();
-
-    match crate::rvc::check_reachable().await {
+async fn check_rvc_python() -> Check {
+    match crate::rvc::check_installed().await {
         Ok(()) => Check {
-            name:   "rvc_sidecar".to_string(),
+            name:   "rvc_python".to_string(),
             status: "ok".to_string(),
-            detail: format!("running at {rvc_url}"),
+            detail: "installed".to_string(),
         },
         Err(_) => Check {
-            name:   "rvc_sidecar".to_string(),
-            status: "not_running".to_string(),
-            detail: "not running (optional — needed for anime character voices)".to_string(),
+            name:   "rvc_python".to_string(),
+            status: "ok".to_string(),
+            detail: "not installed (optional — `pip install rvc-python` for anime character \
+                     voices)"
+                .to_string(),
         },
     }
 }
