@@ -1,0 +1,1 @@
+ALTER TABLE vocabulary ADD COLUMN romaji TEXT NOT NULL DEFAULT '';

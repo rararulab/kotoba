@@ -11,6 +11,9 @@ pub enum KotobaError {
     #[snafu(display("sqlx error: {source}"))]
     Sqlx { source: sqlx::Error },
 
+    #[snafu(display("migration error: {source}"))]
+    Migrate { source: sqlx::migrate::MigrateError },
+
     #[snafu(display("word not found: {word}"))]
     WordNotFound { word: String },
 

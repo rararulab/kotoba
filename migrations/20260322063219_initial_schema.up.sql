@@ -1,8 +1,8 @@
+-- Initial database schema
 CREATE TABLE IF NOT EXISTS vocabulary (
     id INTEGER PRIMARY KEY,
     word TEXT NOT NULL UNIQUE,
     reading TEXT NOT NULL,
-    romaji TEXT NOT NULL DEFAULT '',
     meaning TEXT NOT NULL,
     level TEXT DEFAULT 'N5',
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP

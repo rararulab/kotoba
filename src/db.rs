@@ -117,15 +117,15 @@ impl Database {
 
     const fn pool(&self) -> &sqlx::SqlitePool { self.store.pool() }
 
-    /// Create all tables and seed default profile values.
+    /// Run all pending migrations and seed default profile values.
     #[tracing::instrument(skip(self))]
     pub async fn init(&self) -> Result<()> {
-        tracing::debug!(path = %self.path.display(), "initializing database schema");
-        sqlx::raw_sql(include_str!("schema.sql"))
-            .execute(self.pool())
+        tracing::debug!(path = %self.path.display(), "running database migrations");
+        sqlx::migrate!("./migrations")
+            .run(self.pool())
             .await
-            .context(error::SqlxSnafu)?;
-        tracing::debug!("database schema initialized");
+            .context(error::MigrateSnafu)?;
+        tracing::debug!("database migrations complete");
         Ok(())
     }
 
