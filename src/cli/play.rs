@@ -88,7 +88,7 @@ pub async fn play_word(word: &str) -> Result<PathBuf> {
     // Apply RVC voice conversion if requested (kokoro backend only)
     if let Some(ref model) = rvc_model {
         eprintln!("converting with RVC model: {model}...");
-        crate::rvc::check_installed().await?;
+        crate::rvc::ensure_running().await?;
         let tmp_file = file.with_extension(format!("pre_rvc_{}.wav", std::process::id()));
         std::fs::rename(&file, &tmp_file).context(error::IoSnafu)?;
         crate::rvc::convert(&tmp_file, model, &file).await?;

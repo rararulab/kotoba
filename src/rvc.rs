@@ -1,44 +1,97 @@
-//! RVC v2 voice conversion via subprocess.
+//! RVC v2 voice conversion via a persistent Python sidecar.
 //!
-//! Calls `rvc_python` CLI to convert base TTS audio into
-//! anime character voices. Users must install it with
-//! `pip install rvc-python`.
+//! On first use, spawns `python3 server.py` as a background subprocess
+//! listening on `127.0.0.1:50022`. Subsequent calls reuse the running
+//! server via HTTP.
 
-use std::{path::Path, sync::OnceLock};
+use std::{path::Path, time::Duration};
 
 use snafu::ResultExt;
 
 use crate::error::{self, Result};
 
-/// Cached result of the `rvc_python` installation check.
-static RVC_INSTALLED: OnceLock<bool> = OnceLock::new();
+/// Default port the RVC sidecar listens on.
+const DEFAULT_PORT: u16 = 50022;
 
-/// Check that `rvc_python` is installed and importable.
-///
-/// The result is cached after the first call to avoid spawning
-/// a Python process on every invocation.
-pub async fn check_installed() -> Result<()> {
-    if let Some(&installed) = RVC_INSTALLED.get() {
-        return if installed {
-            Ok(())
-        } else {
-            Err(error::RvcNotInstalledSnafu.build())
-        };
-    }
+/// Embedded copy of the sidecar server script.
+const SERVER_PY: &str = include_str!("../rvc-sidecar/server.py");
 
-    let output = tokio::process::Command::new("python3")
-        .args(["-c", "import rvc_python"])
-        .output()
+/// Return the RVC sidecar base URL.
+pub fn base_url() -> String {
+    std::env::var("RVC_URL").unwrap_or_else(|_| format!("http://127.0.0.1:{DEFAULT_PORT}"))
+}
+
+/// Check whether the sidecar is already responding.
+async fn is_running() -> bool {
+    let url = base_url();
+    crate::http::client()
+        .get(format!("{url}/version"))
+        .timeout(Duration::from_secs(1))
+        .send()
         .await
+        .is_ok()
+}
+
+/// Return the directory where the sidecar script is installed.
+fn sidecar_dir() -> std::path::PathBuf { crate::paths::data_dir().join("rvc-sidecar") }
+
+/// Install the embedded `server.py` to disk if missing or outdated.
+fn install_server_script() -> Result<std::path::PathBuf> {
+    let dir = sidecar_dir();
+    std::fs::create_dir_all(&dir).context(error::IoSnafu)?;
+
+    let script_path = dir.join("server.py");
+
+    // Always overwrite to keep in sync with the embedded version
+    std::fs::write(&script_path, SERVER_PY).context(error::IoSnafu)?;
+
+    Ok(script_path)
+}
+
+/// Spawn the sidecar as a detached background process.
+fn spawn_server(script_path: &Path) -> Result<()> {
+    let port = std::env::var("RVC_PORT").unwrap_or_else(|_| DEFAULT_PORT.to_string());
+
+    std::process::Command::new("python3")
+        .arg(script_path)
+        .env("RVC_PORT", &port)
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .stdin(std::process::Stdio::null())
+        .spawn()
         .context(error::IoSnafu)?;
 
-    let installed = output.status.success();
-    let _ = RVC_INSTALLED.set(installed);
-
-    if !installed {
-        return Err(error::RvcNotInstalledSnafu.build());
-    }
     Ok(())
+}
+
+/// Ensure the RVC sidecar is running, starting it if necessary.
+///
+/// Checks `/version` first. If unreachable, installs the embedded
+/// `server.py` and spawns it as a background subprocess, then waits
+/// up to 10 seconds for it to become ready.
+pub async fn ensure_running() -> Result<()> {
+    if is_running().await {
+        return Ok(());
+    }
+
+    let script_path = install_server_script()?;
+    spawn_server(&script_path)?;
+
+    // Wait for server to become ready
+    for _ in 0..20 {
+        tokio::time::sleep(Duration::from_millis(500)).await;
+        if is_running().await {
+            return Ok(());
+        }
+    }
+
+    Err(error::RvcSnafu {
+        message: format!(
+            "sidecar failed to start at {} — check python3 and uvicorn are installed",
+            base_url()
+        ),
+    }
+    .build())
 }
 
 /// Validate that a model name contains no path traversal characters.
@@ -55,48 +108,41 @@ fn validate_model_name(model: &str) -> Result<()> {
 /// Convert audio at `input_path` using the given RVC model,
 /// writing the result to `output_path`.
 ///
-/// Spawns `rvc_cli infer` as a subprocess with the model located
-/// at `~/.kotoba/models/rvc/{model}/model.pth`.
+/// Sends the WAV file to the sidecar's `/convert` endpoint via
+/// HTTP multipart upload.
 pub async fn convert(input_path: &Path, model: &str, output_path: &Path) -> Result<()> {
     validate_model_name(model)?;
 
-    let model_dir = crate::paths::models_dir().join("rvc").join(model);
-    let model_pth = model_dir.join("model.pth");
+    let url = base_url();
+    let client = crate::http::client();
 
-    if !model_pth.exists() {
+    let input_bytes = std::fs::read(input_path).context(error::IoSnafu)?;
+
+    let part = reqwest::multipart::Part::bytes(input_bytes)
+        .file_name("input.wav")
+        .mime_str("audio/wav")
+        .expect("valid mime type");
+
+    let form = reqwest::multipart::Form::new().part("file", part);
+
+    let response = client
+        .post(format!("{url}/convert"))
+        .query(&[("model", model)])
+        .multipart(form)
+        .send()
+        .await
+        .context(error::HttpSnafu)?;
+
+    if !response.status().is_success() {
+        let body = response.text().await.unwrap_or_default();
         return Err(error::RvcSnafu {
-            message: format!(
-                "model not found: {model} — download with `kotoba huggingface add rvc:<repo>`"
-            ),
+            message: format!("conversion failed: {body}"),
         }
         .build());
     }
 
-    let mut cmd = tokio::process::Command::new("rvc_cli");
-    cmd.arg("infer")
-        .arg("-i")
-        .arg(input_path)
-        .arg("-o")
-        .arg(output_path)
-        .arg("-mp")
-        .arg(&model_pth);
-
-    // Use index file if available for better voice quality
-    let index_path = model_dir.join("model.index");
-    if index_path.exists() {
-        cmd.arg("-ip").arg(&index_path);
-    }
-
-    let output = cmd.output().await.context(error::IoSnafu)?;
-
-    if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        return Err(error::RvcSnafu {
-            message: format!("rvc_cli infer failed: {stderr}"),
-        }
-        .build());
-    }
-
+    let audio = response.bytes().await.context(error::HttpSnafu)?;
+    std::fs::write(output_path, &audio).context(error::IoSnafu)?;
     Ok(())
 }
 
@@ -105,9 +151,16 @@ mod tests {
     use super::*;
 
     #[test]
-    fn rvc_model_path_resolves() {
-        let dir = crate::paths::models_dir().join("rvc").join("test-model");
-        assert!(dir.ends_with("rvc/test-model"));
+    fn base_url_contains_port() {
+        let url = base_url();
+        assert!(url.starts_with("http"));
+        assert!(url.contains("50022"));
+    }
+
+    #[test]
+    fn sidecar_dir_is_under_data() {
+        let dir = sidecar_dir();
+        assert!(dir.ends_with("rvc-sidecar"));
     }
 
     #[test]
@@ -122,5 +175,10 @@ mod tests {
     fn validate_accepts_normal_names() {
         assert!(validate_model_name("naruto-rvc-v2").is_ok());
         assert!(validate_model_name("my_model").is_ok());
+    }
+
+    #[test]
+    fn server_py_is_embedded() {
+        assert!(SERVER_PY.contains("kotoba-rvc-sidecar"));
     }
 }
