@@ -6,7 +6,7 @@ use snafu::ResultExt;
 
 use crate::{
     error::{self, Result},
-    tts::{TtsBackend, VitsBackend, VoicevoxBackend},
+    tts::{KokoroBackend, TtsBackend, VitsBackend, VoicevoxBackend},
 };
 
 /// Parsed voice configuration specifying backend and speaker/model identifier.
@@ -56,6 +56,9 @@ pub async fn play_word(word: &str) -> Result<PathBuf> {
 
     eprintln!("synthesizing: {word}...");
 
+    // RVC model is only applicable to the kokoro backend
+    let mut rvc_model: Option<String> = None;
+
     let backend: Box<dyn TtsBackend> = match config.backend.as_str() {
         "voicevox" => {
             let base_url = voicevox_base_url();
@@ -63,15 +66,34 @@ pub async fn play_word(word: &str) -> Result<PathBuf> {
             Box::new(VoicevoxBackend::new(base_url, config.speaker_id.clone()))
         }
         "vits" => Box::new(VitsBackend::new(config.speaker_id.clone())),
+        "kokoro" => {
+            // Split once to extract both the base voice and optional RVC model
+            let (base_voice, rvc) = match config.speaker_id.split_once("+rvc:") {
+                Some((base, model)) => (base.to_string(), Some(model.to_string())),
+                None => (config.speaker_id.clone(), None),
+            };
+            rvc_model = rvc;
+            Box::new(KokoroBackend::new(base_voice))
+        }
         other => {
-            return Err(error::VoicevoxSnafu {
+            return error::VoicevoxSnafu {
                 message: format!("unknown voice backend: {other}"),
             }
-            .build());
+            .fail();
         }
     };
 
     backend.synthesize(word, &file).await?;
+
+    // Apply RVC voice conversion if requested (kokoro backend only)
+    if let Some(ref model) = rvc_model {
+        eprintln!("converting with RVC model: {model}...");
+        crate::rvc::ensure_running().await?;
+        let tmp_file = file.with_extension(format!("pre_rvc_{}.wav", std::process::id()));
+        std::fs::rename(&file, &tmp_file).context(error::IoSnafu)?;
+        crate::rvc::convert(&tmp_file, model, &file).await?;
+        let _ = std::fs::remove_file(&tmp_file);
+    }
 
     eprintln!("cached ({}): {}", backend.name(), file.display());
 
@@ -121,6 +143,21 @@ mod tests {
         let config = parse_voice_config("vits:my-model");
         assert_eq!(config.backend, "vits");
         assert_eq!(config.speaker_id, "my-model");
+    }
+
+    #[test]
+    fn parse_voice_config_kokoro() {
+        let config = parse_voice_config("kokoro:af_heart");
+        assert_eq!(config.backend, "kokoro");
+        assert_eq!(config.speaker_id, "af_heart");
+    }
+
+    #[test]
+    fn parse_voice_config_kokoro_with_rvc() {
+        let config = parse_voice_config("kokoro:af_heart+rvc:naruto");
+        assert_eq!(config.backend, "kokoro");
+        // speaker_id should contain the full suffix for downstream parsing
+        assert_eq!(config.speaker_id, "af_heart+rvc:naruto");
     }
 
     #[test]
