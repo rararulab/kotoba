@@ -1,9 +1,10 @@
 //! `kotoba setup` — download VOICEVOX Engine and initialize environment.
 
-use std::io::Write;
+use std::io::{Read as _, Write};
 
 use futures_util::StreamExt;
 use indicatif::{ProgressBar, ProgressStyle};
+use reqwest::StatusCode;
 use serde::Serialize;
 use sha2::{Digest, Sha256};
 use snafu::ResultExt;
@@ -74,21 +75,44 @@ pub async fn run(db: &Database) -> Result<SetupResult> {
 async fn download_voicevox(version: &str) -> Result<()> {
     let url = voicevox_download_url(version);
     let dir = crate::paths::voicevox_dir();
+    let tmp = dir.with_extension("tmp");
 
     eprintln!("  downloading voicevox engine {version}...");
     eprintln!("  url: {url}");
 
-    let dl_client = crate::http::download_client();
-    let response = dl_client.get(&url).send().await.context(error::HttpSnafu)?;
+    std::fs::create_dir_all(tmp.parent().expect("parent dir")).context(error::IoSnafu)?;
 
-    if !response.status().is_success() {
-        return Err(error::VoicevoxSnafu {
-            message: format!("download failed: HTTP {}", response.status()),
-        }
-        .build());
+    let dl_client = crate::http::download_client();
+
+    // Check for a partial download from a previous interrupted attempt.
+    let existing_len = std::fs::metadata(&tmp).map(|m| m.len()).unwrap_or(0);
+
+    let mut request = dl_client.get(&url);
+    if existing_len > 0 {
+        eprintln!("  resuming from byte {existing_len}...");
+        request = request.header(reqwest::header::RANGE, format!("bytes={existing_len}-"));
     }
 
-    let total_size = response.content_length().unwrap_or(0);
+    let response = request.send().await.context(error::HttpSnafu)?;
+    let status = response.status();
+
+    // 206 = server supports range, resume; 200 = full response, restart.
+    let (resumed, total_size) = match status {
+        StatusCode::PARTIAL_CONTENT => {
+            let remaining = response.content_length().unwrap_or(0);
+            (true, existing_len + remaining)
+        }
+        s if s.is_success() => {
+            let total = response.content_length().unwrap_or(0);
+            (false, total)
+        }
+        _ => {
+            return Err(error::VoicevoxSnafu {
+                message: format!("download failed: HTTP {status}"),
+            }
+            .build());
+        }
+    };
 
     let pb = ProgressBar::new(total_size);
     pb.set_style(
@@ -100,14 +124,21 @@ async fn download_voicevox(version: &str) -> Result<()> {
             .progress_chars("=>-"),
     );
 
-    let tmp = dir.with_extension("tmp");
-    std::fs::create_dir_all(tmp.parent().expect("parent dir")).context(error::IoSnafu)?;
-
-    // Stream the response body to disk in chunks, computing SHA256 as we go.
-    let mut stream = response.bytes_stream();
-    let mut file = std::fs::File::create(&tmp).context(error::IoSnafu)?;
+    // Hash the already-downloaded portion so the final checksum covers the
+    // entire file, then open the file in the appropriate mode.
     let mut hasher = Sha256::new();
+    let mut file = if resumed {
+        hash_existing_file(&tmp, &mut hasher)?;
+        pb.set_position(existing_len);
+        std::fs::OpenOptions::new()
+            .append(true)
+            .open(&tmp)
+            .context(error::IoSnafu)?
+    } else {
+        std::fs::File::create(&tmp).context(error::IoSnafu)?
+    };
 
+    let mut stream = response.bytes_stream();
     while let Some(chunk) = stream.next().await {
         let chunk = chunk.context(error::HttpSnafu)?;
         hasher.update(&chunk);
@@ -122,8 +153,8 @@ async fn download_voicevox(version: &str) -> Result<()> {
     verify_against_sidecar(crate::http::client(), &url, &actual_hash, &tmp).await?;
 
     // Extract .vvpp archive (zip format)
-    let file = std::fs::File::open(&tmp).context(error::IoSnafu)?;
-    let mut archive = zip::ZipArchive::new(file).map_err(|e| {
+    let archive_file = std::fs::File::open(&tmp).context(error::IoSnafu)?;
+    let mut archive = zip::ZipArchive::new(archive_file).map_err(|e| {
         error::ZipSnafu {
             message: format!("failed to open archive: {e}"),
         }
@@ -155,6 +186,20 @@ async fn download_voicevox(version: &str) -> Result<()> {
     }
 
     eprintln!("  voicevox engine installed at {}", dir.display());
+    Ok(())
+}
+
+/// Feed the contents of an existing partial file into a hasher.
+fn hash_existing_file(path: &std::path::Path, hasher: &mut Sha256) -> Result<()> {
+    let mut file = std::fs::File::open(path).context(error::IoSnafu)?;
+    let mut buf = vec![0u8; 64 * 1024];
+    loop {
+        let n = file.read(&mut buf).context(error::IoSnafu)?;
+        if n == 0 {
+            break;
+        }
+        hasher.update(&buf[..n]);
+    }
     Ok(())
 }
 
