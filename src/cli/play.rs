@@ -89,7 +89,7 @@ pub async fn play_word(word: &str) -> Result<PathBuf> {
     if let Some(ref model) = rvc_model {
         eprintln!("converting with RVC model: {model}...");
         crate::rvc::check_installed().await?;
-        let tmp_file = file.with_extension("pre_rvc.wav");
+        let tmp_file = file.with_extension(format!("pre_rvc_{}.wav", std::process::id()));
         std::fs::rename(&file, &tmp_file).context(error::IoSnafu)?;
         crate::rvc::convert(&tmp_file, model, &file).await?;
         let _ = std::fs::remove_file(&tmp_file);
