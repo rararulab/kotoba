@@ -156,7 +156,11 @@ pub enum Command {
     /// Download VOICEVOX Engine, initialize DB, and configure environment
     Setup,
     /// Check all dependencies (DB, VOICEVOX, models, disk space)
-    Doctor,
+    Doctor {
+        /// Output as JSON for scripting
+        #[arg(long)]
+        json: bool,
+    },
     /// Initialize the database (without full setup)
     Init,
     /// Manage config values

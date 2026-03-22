@@ -138,8 +138,8 @@ async fn run() -> std::result::Result<(), Box<dyn std::error::Error>> {
                 serde_json::json!({"ok": true, "action": "setup", "db_path": result.db_path, "voicevox_installed": result.voicevox_installed})
             );
         }
-        Command::Doctor => {
-            cli::doctor::run(&db).await?;
+        Command::Doctor { json } => {
+            cli::doctor::run(&db, json).await?;
         }
         Command::Voice { action } => match action {
             cli::VoiceAction::List => {
