@@ -6,7 +6,7 @@
 
 use std::{path::Path, time::Duration};
 
-use snafu::{ensure, ResultExt};
+use snafu::{ResultExt, ensure};
 
 use crate::error::{self, Result};
 
