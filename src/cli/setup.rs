@@ -78,8 +78,8 @@ async fn download_voicevox(version: &str) -> Result<()> {
     eprintln!("  downloading voicevox engine {version}...");
     eprintln!("  url: {url}");
 
-    let client = crate::http::client();
-    let response = client.get(&url).send().await.context(error::HttpSnafu)?;
+    let dl_client = crate::http::download_client();
+    let response = dl_client.get(&url).send().await.context(error::HttpSnafu)?;
 
     if !response.status().is_success() {
         return Err(error::VoicevoxSnafu {
@@ -119,7 +119,7 @@ async fn download_voicevox(version: &str) -> Result<()> {
 
     // Verify the download against the SHA256 sidecar file
     let actual_hash = format!("{:x}", hasher.finalize());
-    verify_against_sidecar(client, &url, &actual_hash, &tmp).await?;
+    verify_against_sidecar(crate::http::client(), &url, &actual_hash, &tmp).await?;
 
     // Extract .vvpp archive (zip format)
     let file = std::fs::File::open(&tmp).context(error::IoSnafu)?;
