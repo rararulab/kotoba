@@ -5,12 +5,7 @@
 //! - 3 — user understands word in context
 //! - 1 — user misuses word or asks what it means again
 
-use snafu::ensure;
-
-use crate::{
-    db::Database,
-    error::{self, Result},
-};
+use crate::{db::Database, error::Result};
 
 /// Record a review for a vocabulary word and update SRS state.
 #[tracing::instrument(skip(db))]
@@ -33,9 +28,11 @@ async fn record_review_item(
     item_type: &str,
     quality: u8,
 ) -> Result<()> {
-    ensure!(
+    // Quality is enforced by clap at parse time; assert here to catch internal
+    // misuse
+    debug_assert!(
         matches!(quality, 1 | 3 | 5),
-        error::InvalidQualitySnafu { value: quality }
+        "invalid quality {quality}: must be 1, 3, or 5"
     );
 
     let prev = db.get_latest_review(item_id, item_type).await?;
