@@ -55,7 +55,10 @@ fn tokenize(text: &str, lang: &str) -> Vec<i64> {
             c if c.is_ascii_alphabetic() => i64::from(c as u8 - b'a') + 2,
             '-' => 28,  // long vowel marker
             '\'' => 29, // glottal stop
-            _ => 1,     // fallback to space token
+            other => {
+                tracing::warn!("unmapped character in tokenizer: {other:?}");
+                1 // fallback to space token
+            }
         };
         ids.push(id);
     }

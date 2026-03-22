@@ -67,6 +67,8 @@ pub fn list() -> Result<()> {
     }
 
     // Kokoro ONNX voices (available only when the model is downloaded)
+    // TODO: read available voices from voices-v1.0.bin metadata instead of
+    // hardcoding
     let kokoro_model = models_path.join("kokoro").join("kokoro-v1.0.onnx");
     if kokoro_model.exists() {
         let kokoro_voices = [
