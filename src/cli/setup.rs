@@ -229,7 +229,13 @@ async fn verify_against_sidecar(
     }
 
     let sidecar_text = sidecar_resp.text().await.context(error::HttpSnafu)?;
-    let expected_hash = parse_checksum_sidecar(&sidecar_text);
+
+    let Some(expected_hash) = parse_checksum_sidecar(&sidecar_text) else {
+        eprintln!(
+            "  warning: sidecar does not contain a valid SHA-256 hash, skipping verification"
+        );
+        return Ok(());
+    };
 
     verify_checksum(actual_hash, &expected_hash).inspect_err(|_| {
         // Delete the corrupted download before returning the error
@@ -242,14 +248,14 @@ async fn verify_against_sidecar(
 /// Handles two common formats:
 /// - Just the hex hash on a line
 /// - `<hash>  <filename>` (BSD/GNU coreutils style)
-fn parse_checksum_sidecar(content: &str) -> String {
-    let trimmed = content.trim();
-    // If the line contains whitespace, the hash is the first token
-    trimmed
+///
+/// Returns `None` if no valid SHA-256 hex hash (64 hex chars) is found,
+/// e.g. when the sidecar contains only a filename.
+fn parse_checksum_sidecar(content: &str) -> Option<String> {
+    content
         .split_whitespace()
-        .next()
-        .unwrap_or(trimmed)
-        .to_lowercase()
+        .find(|token| token.len() == 64 && token.chars().all(|c| c.is_ascii_hexdigit()))
+        .map(str::to_lowercase)
 }
 
 /// Compare a computed hash against an expected hash string.
@@ -299,17 +305,25 @@ mod tests {
     fn parse_sidecar_hash_only() {
         let content = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855\n";
         assert_eq!(
-            parse_checksum_sidecar(content),
-            "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+            parse_checksum_sidecar(content).as_deref(),
+            Some("e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855")
         );
     }
 
     #[test]
     fn parse_sidecar_with_filename() {
-        let content = "E3B0C44298FC1C149AFBF4C8996FB924  voicevox_engine-macos-arm64-0.22.2.vvpp\n";
+        let content = "E3B0C44298FC1C149AFBF4C8996FB92427AE41E4649B934CA495991B7852B855  \
+                       voicevox_engine-macos-arm64-0.22.2.vvpp\n";
         assert_eq!(
-            parse_checksum_sidecar(content),
-            "e3b0c44298fc1c149afbf4c8996fb924"
+            parse_checksum_sidecar(content).as_deref(),
+            Some("e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855")
         );
+    }
+
+    #[test]
+    fn parse_sidecar_filename_only() {
+        // VOICEVOX sidecar contains only the filename, no hash
+        let content = "voicevox_engine-macos-arm64-0.22.2.vvpp\n";
+        assert_eq!(parse_checksum_sidecar(content), None);
     }
 }
