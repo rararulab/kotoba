@@ -76,10 +76,10 @@ pub async fn play_word(word: &str) -> Result<PathBuf> {
             Box::new(KokoroBackend::new(base_voice))
         }
         other => {
-            return Err(error::VoicevoxSnafu {
+            return error::VoicevoxSnafu {
                 message: format!("unknown voice backend: {other}"),
             }
-            .build());
+            .fail();
         }
     };
 

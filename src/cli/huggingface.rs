@@ -5,7 +5,7 @@ use std::{io::Write, path::Path};
 use futures_util::StreamExt;
 use indicatif::{ProgressBar, ProgressStyle};
 use serde::Serialize;
-use snafu::ResultExt;
+use snafu::{ensure, ResultExt};
 
 use crate::error::{self, Result};
 
@@ -36,13 +36,13 @@ pub struct ModelInfo {
 async fn download_file(client: &reqwest::Client, url: &str, dest: &Path) -> Result<u64> {
     let response = client.get(url).send().await.context(error::HttpSnafu)?;
 
-    if !response.status().is_success() {
-        return Err(error::DownloadFailedSnafu {
+    ensure!(
+        response.status().is_success(),
+        error::DownloadFailedSnafu {
             url:    url.to_string(),
             status: response.status().to_string(),
         }
-        .build());
-    }
+    );
 
     let total_size = response.content_length().unwrap_or(0);
 
@@ -70,11 +70,11 @@ async fn download_file(client: &reqwest::Client, url: &str, dest: &Path) -> Resu
     let file_size = std::fs::metadata(dest).context(error::IoSnafu)?.len();
     if file_size == 0 {
         let _ = std::fs::remove_file(dest);
-        return Err(error::DownloadFailedSnafu {
+        return error::DownloadFailedSnafu {
             url:    url.to_string(),
-            status: "downloaded file is empty (0 bytes)".to_string(),
+            status: "downloaded file is empty (0 bytes)",
         }
-        .build());
+        .fail();
     }
 
     eprintln!("  downloaded {file_size} bytes");

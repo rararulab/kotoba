@@ -4,7 +4,7 @@
 
 use std::path::{Path, PathBuf};
 
-use ndarray::Array2;
+use ndarray::{Array1, Array2};
 use ort::{inputs, session::Session, value::TensorRef};
 use snafu::{ResultExt, Snafu};
 
@@ -23,6 +23,10 @@ pub enum KokoroError {
     /// I/O error when reading or writing files.
     #[snafu(display("io error: {source}"))]
     Io { source: std::io::Error },
+
+    /// Failed to load voice style vector from voices binary.
+    #[snafu(display("failed to load voice style for '{voice}' — ensure voices-v1.0.bin exists"))]
+    VoiceLoad { voice: String },
 
     /// Blocking task join error.
     #[snafu(display("join error: {source}"))]
@@ -87,6 +91,14 @@ pub async fn synthesize(text: &str, lang: &str, voice: &str, output: &Path) -> R
         .fail();
     }
 
+    let voices_path = model_dir.join("voices-v1.0.bin");
+    if !voices_path.exists() {
+        return ModelNotFoundSnafu {
+            path: voices_path.display().to_string(),
+        }
+        .fail();
+    }
+
     let tokens = tokenize(text, lang);
     let voice = voice.to_string();
     let output = output.to_path_buf();
@@ -96,16 +108,52 @@ pub async fn synthesize(text: &str, lang: &str, voice: &str, output: &Path) -> R
         .context(JoinSnafu)?
 }
 
+/// Style embedding dimension used by the Kokoro model.
+const STYLE_DIM: usize = 256;
+
+/// Load a voice style vector from `voices-v1.0.bin`.
+///
+/// The file is a raw little-endian f32 array of shape `[N, 1, 256]`.
+/// The style vector is selected by token length (before BOS/EOS padding).
+fn load_style_vector(voice: &str, token_len: usize) -> Result<Vec<f32>> {
+    let voices_path = models_dir().join("voices-v1.0.bin");
+    let data = std::fs::read(&voices_path).context(IoSnafu)?;
+
+    // Each voice entry in the .bin file is a NumPy .npy archive
+    // loaded via np.load(). For the combined voices-v1.0.bin,
+    // the format is a NumPy .npz containing per-voice arrays of
+    // shape [512, 1, 256] as raw f32.
+    //
+    // For simplicity, we support the single-voice .bin format:
+    // raw little-endian f32 of shape [N, 1, 256] = N * 256 floats.
+    let floats: Vec<f32> = data
+        .chunks_exact(4)
+        .map(|b| f32::from_le_bytes([b[0], b[1], b[2], b[3]]))
+        .collect();
+
+    let num_styles = floats.len() / STYLE_DIM;
+    let idx = token_len.min(num_styles.saturating_sub(1));
+    let start = idx * STYLE_DIM;
+
+    if start + STYLE_DIM > floats.len() {
+        return VoiceLoadSnafu {
+            voice: voice.to_string(),
+        }
+        .fail();
+    }
+
+    Ok(floats[start..start + STYLE_DIM].to_vec())
+}
+
 /// Run Kokoro ONNX inference synchronously.
 ///
-/// Creates input tensors (token IDs, lengths), runs the model,
+/// Creates input tensors (`input_ids`, `style`, `speed`), runs the model,
 /// and writes the output audio to a WAV file.
-///
-/// NOTE: `_voice` is currently unused — voice embedding loading from
-/// `voices-v1.0.bin` is pending model format investigation. The ONNX
-/// tensor names (`tokens`, `token_lengths`) also need verification
-/// against the actual Kokoro v1.0 model. See plan open questions #1-2.
-fn run_inference(model_path: &Path, tokens: &[i64], _voice: &str, output: &Path) -> Result<()> {
+fn run_inference(model_path: &Path, tokens: &[i64], voice: &str, output: &Path) -> Result<()> {
+    // Token count before BOS/EOS padding (used for style vector selection)
+    let inner_token_len = tokens.len().saturating_sub(2);
+    let style_data = load_style_vector(voice, inner_token_len)?;
+
     let mut session = Session::builder()
         .context(OnnxRuntimeSnafu)?
         .commit_from_file(model_path)
@@ -116,15 +164,26 @@ fn run_inference(model_path: &Path, tokens: &[i64], _voice: &str, output: &Path)
         .expect("token shape must match array dimensions");
     let ids_tensor = TensorRef::from_array_view(&ids_array).context(OnnxRuntimeSnafu)?;
 
-    #[allow(clippy::cast_possible_wrap)]
-    let lengths_data = vec![seq_len as i64];
-    let lengths_tensor =
-        TensorRef::from_array_view(([1usize], &*lengths_data)).context(OnnxRuntimeSnafu)?;
+    let style_array = Array2::from_shape_vec((1, STYLE_DIM), style_data)
+        .expect("style shape must match array dimensions");
+    let style_tensor = TensorRef::from_array_view(&style_array).context(OnnxRuntimeSnafu)?;
+
+    let speed_data = Array1::from_vec(vec![1.0_f32]);
+    let speed_tensor = TensorRef::from_array_view(&speed_data).context(OnnxRuntimeSnafu)?;
+
+    // The model accepts both "tokens"/"input_ids" naming conventions.
+    // Detect which one by checking the session's input names.
+    let input_name = session
+        .inputs()
+        .iter()
+        .find(|i| i.name() == "input_ids")
+        .map_or("tokens", |_| "input_ids");
 
     let outputs = session
         .run(inputs![
-            "tokens" => ids_tensor,
-            "token_lengths" => lengths_tensor
+            input_name => ids_tensor,
+            "style" => style_tensor,
+            "speed" => speed_tensor
         ])
         .context(OnnxRuntimeSnafu)?;
 

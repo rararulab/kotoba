@@ -3,7 +3,7 @@ mod cli;
 mod db;
 mod error;
 mod http;
-mod kokoro;
+pub(crate) mod kokoro;
 mod paths;
 mod romaji;
 mod rvc;

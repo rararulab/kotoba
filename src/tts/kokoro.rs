@@ -3,6 +3,7 @@
 use std::path::Path;
 
 use async_trait::async_trait;
+use snafu::ResultExt;
 
 use super::TtsBackend;
 use crate::error::{self, Result};
@@ -22,12 +23,7 @@ impl TtsBackend for KokoroBackend {
     async fn synthesize(&self, text: &str, output: &Path) -> Result<()> {
         crate::kokoro::synthesize(text, "ja", &self.voice, output)
             .await
-            .map_err(|e| {
-                error::KokoroSnafu {
-                    message: e.to_string(),
-                }
-                .build()
-            })
+            .context(error::KokoroSnafu)
     }
 
     fn name(&self) -> &'static str { "kokoro" }

@@ -6,7 +6,7 @@
 
 use std::{path::Path, time::Duration};
 
-use snafu::ResultExt;
+use snafu::{ensure, ResultExt};
 
 use crate::error::{self, Result};
 
@@ -21,7 +21,7 @@ pub fn base_url() -> String {
     std::env::var("RVC_URL").unwrap_or_else(|_| format!("http://127.0.0.1:{DEFAULT_PORT}"))
 }
 
-/// Check whether the sidecar is already responding.
+/// Check whether the sidecar is already responding with a healthy status.
 async fn is_running() -> bool {
     let url = base_url();
     crate::http::client()
@@ -29,7 +29,7 @@ async fn is_running() -> bool {
         .timeout(Duration::from_secs(1))
         .send()
         .await
-        .is_ok()
+        .is_ok_and(|r| r.status().is_success())
 }
 
 /// Return the directory where the sidecar script is installed.
@@ -49,17 +49,25 @@ fn install_server_script() -> Result<std::path::PathBuf> {
 }
 
 /// Spawn the sidecar as a detached background process.
+///
+/// Writes the child PID to `sidecar_dir()/pid` for lifecycle tracking,
+/// and redirects stderr to `sidecar_dir()/sidecar.log` for diagnostics.
 fn spawn_server(script_path: &Path) -> Result<()> {
     let port = std::env::var("RVC_PORT").unwrap_or_else(|_| DEFAULT_PORT.to_string());
+    let dir = sidecar_dir();
+    let log_file = std::fs::File::create(dir.join("sidecar.log")).context(error::IoSnafu)?;
 
-    std::process::Command::new("python3")
+    let child = std::process::Command::new("python3")
         .arg(script_path)
         .env("RVC_PORT", &port)
         .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null())
+        .stderr(log_file)
         .stdin(std::process::Stdio::null())
         .spawn()
         .context(error::IoSnafu)?;
+
+    // Record PID so the sidecar can be identified or cleaned up later
+    let _ = std::fs::write(dir.join("pid"), child.id().to_string());
 
     Ok(())
 }
@@ -85,23 +93,23 @@ pub async fn ensure_running() -> Result<()> {
         }
     }
 
-    Err(error::RvcSnafu {
+    error::RvcSnafu {
         message: format!(
             "sidecar failed to start at {} — check python3 and uvicorn are installed",
             base_url()
         ),
     }
-    .build())
+    .fail()
 }
 
 /// Validate that a model name contains no path traversal characters.
 fn validate_model_name(model: &str) -> Result<()> {
-    if model.is_empty() || model.contains('/') || model.contains('\\') || model.contains("..") {
-        return Err(error::RvcSnafu {
+    ensure!(
+        !model.is_empty() && !model.contains('/') && !model.contains('\\') && !model.contains(".."),
+        error::RvcSnafu {
             message: format!("invalid model name: {model}"),
         }
-        .build());
-    }
+    );
     Ok(())
 }
 
@@ -135,10 +143,10 @@ pub async fn convert(input_path: &Path, model: &str, output_path: &Path) -> Resu
 
     if !response.status().is_success() {
         let body = response.text().await.unwrap_or_default();
-        return Err(error::RvcSnafu {
+        return error::RvcSnafu {
             message: format!("conversion failed: {body}"),
         }
-        .build());
+        .fail();
     }
 
     let audio = response.bytes().await.context(error::HttpSnafu)?;

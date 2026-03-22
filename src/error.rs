@@ -56,17 +56,14 @@ pub enum KotobaError {
     #[snafu(display("zip error: {message}"))]
     Zip { message: String },
 
-    #[snafu(display("Kokoro TTS error: {message}"))]
-    Kokoro { message: String },
+    #[snafu(display("Kokoro TTS error: {source}"))]
+    Kokoro { source: crate::kokoro::KokoroError },
 
     #[snafu(display("RVC error: {message}"))]
     Rvc { message: String },
 
     #[snafu(display("download failed for {url}: HTTP {status}"))]
     DownloadFailed { url: String, status: String },
-
-    #[snafu(display("RVC sidecar not running at {url}"))]
-    RvcNotRunning { url: String },
 }
 
 pub type Result<T> = std::result::Result<T, KotobaError>;

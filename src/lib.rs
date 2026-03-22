@@ -4,6 +4,7 @@ pub mod app_config;
 pub mod db;
 pub mod error;
 pub mod http;
+pub mod kokoro;
 pub mod paths;
 pub mod romaji;
 pub mod srs;
