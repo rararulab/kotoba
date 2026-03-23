@@ -15,7 +15,7 @@ git clone https://github.com/rararulab/kotoba && cd kotoba && cargo install --pa
 ## Quick Start
 
 ```bash
-kotoba setup                             # Download VOICEVOX, init DB, configure default Kokoro+RVC voice
+kotoba setup                             # One-shot setup (VOICEVOX + DB + default Kokoro+RVC + CosyVoice bootstrap)
 kotoba add 成功 --level n5               # Add vocabulary (auto-fill reading + meaning)
 kotoba review                            # Show due reviews
 kotoba seen 成功 recalled                 # Record review (forgot/recognized/recalled)
@@ -63,6 +63,10 @@ kotoba voice list                        # List available voices
 kotoba voice set voicevox:3              # Use VOICEVOX speaker 3
 kotoba voice set kokoro:af_heart         # Use Kokoro ONNX (local, no server needed)
 kotoba voice set kokoro:af_heart+rvc:naruto  # Kokoro + RVC voice conversion
+kotoba voice set cosyvoice:中文女         # Use CosyVoice speaker/profile from runtime
+kotoba setup                             # Also tries to auto-detect/start CosyVoice runtime
+kotoba config set cosyvoice.url http://127.0.0.1:50000
+kotoba config set cosyvoice.mode sft
 kotoba config set voice.speed 0.85       # Slow down speech speed
 ```
 
@@ -78,7 +82,7 @@ kotoba huggingface list                  # List downloaded models
 ### System
 
 ```bash
-kotoba setup                             # Full setup (VOICEVOX + DB + default Kokoro+RVC voice)
+kotoba setup                             # Full setup (VOICEVOX + DB + default Kokoro+RVC + CosyVoice bootstrap)
 kotoba doctor                            # Health check all dependencies
 kotoba doctor --json                     # Machine-readable health report
 kotoba config set voice.active kokoro:af_heart  # Set config values
@@ -91,7 +95,27 @@ kotoba config set voice.active kokoro:af_heart  # Set config values
 | `voicevox` | `voicevox:<speaker_id>` | VOICEVOX Engine running (`kotoba setup`) |
 | `kokoro` | `kokoro:<voice>` | Kokoro ONNX model (`kotoba huggingface add kokoro`) |
 | `vits` | `vits:<model>` | VITS model (`kotoba huggingface add user/model`) |
+| `cosyvoice` | `cosyvoice:<spk_id>` | CosyVoice runtime API at `cosyvoice.url` (`setup`/`play` auto-detects launcher) |
 | `kokoro+rvc` | `kokoro:<voice>+rvc:<model>` | Kokoro model + RVC model + Python venv (see below) |
+
+### CosyVoice Auto-start
+
+`kotoba` can auto-start CosyVoice when `voice.active` is `cosyvoice:*` and `cosyvoice.url` is not reachable.
+
+Default behavior:
+
+```bash
+kotoba config set cosyvoice.autostart true   # default=true
+kotoba setup                                 # bootstraps managed CosyVoice and starts it when possible
+```
+
+If auto-detection cannot find your CosyVoice install, set launcher manually:
+
+```bash
+kotoba config set cosyvoice.command "python3 /path/to/CosyVoice/runtime/python/fastapi/server.py --port {port} --model_dir iic/CosyVoice2-0.5B"
+```
+
+Then `kotoba play ...` will probe the endpoint and launch the runtime when needed.
 
 ## RVC Voice Conversion Setup
 

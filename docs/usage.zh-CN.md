@@ -23,10 +23,11 @@ kotoba --help
 kotoba setup
 ```
 
-`setup` 会做四件事：
+`setup` 会做这些事：
 - 初始化数据库
 - 安装 VOICEVOX 引擎
 - 下载默认的 Kokoro + 花泽香菜（中野一花）RVC 模型
+- 尝试一键准备 CosyVoice runtime（clone + venv + 依赖）并自动拉起
 - 写入默认语音配置（`voice.active`）并把 `voice.speed` 设为 `0.90`
 
 如果你只想先建库，不下语音引擎，也可以：
@@ -176,6 +177,41 @@ kotoba voice rvc off
 ```
 
 模糊匹配：输入名称的任意子串即可，大小写不敏感。如果匹配到多个模型会提示你输入更精确的名称。
+
+### 5.6 CosyVoice（免训练克隆路线）
+
+如果你不想训练 RVC，可以直接接 CosyVoice runtime，并让 `kotoba` 自动拉起服务（不用每次手动起进程）：
+
+```bash
+# 1) 指向 CosyVoice 服务地址（默认 127.0.0.1:50000）
+kotoba config set cosyvoice.url http://127.0.0.1:50000
+
+# 2) 允许自动拉起（默认就是 true）
+kotoba config set cosyvoice.autostart true
+
+# 3) 运行 setup（会尝试自动探测并启动 CosyVoice）
+kotoba setup
+
+# 4) 用 sft 模式最简单
+kotoba config set cosyvoice.mode sft
+kotoba voice set cosyvoice:中文女
+kotoba play こんにちは --enable
+```
+
+如果你的 CosyVoice 不在默认探测路径，再手动补这一条：
+
+```bash
+kotoba config set cosyvoice.command "python3 /path/to/CosyVoice/runtime/python/fastapi/server.py --port {port} --model_dir iic/CosyVoice2-0.5B"
+```
+
+零样本克隆常用配置：
+
+```bash
+kotoba config set cosyvoice.mode zero_shot
+kotoba config set cosyvoice.prompt_text 希望你以后能够做的比我还好呦。
+kotoba config set cosyvoice.prompt_wav /abs/path/prompt.wav
+kotoba voice set cosyvoice:clone
+```
 
 ## 6. 怎么添加动漫角色 model（重点）
 

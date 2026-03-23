@@ -29,6 +29,9 @@ pub enum KotobaError {
     #[snafu(display("VOICEVOX error: {message}"))]
     Voicevox { message: String },
 
+    #[snafu(display("CosyVoice error: {message}"))]
+    Cosyvoice { message: String },
+
     #[snafu(display("HTTP error: {source}"))]
     Http { source: reqwest::Error },
 
