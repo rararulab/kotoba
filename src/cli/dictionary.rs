@@ -143,36 +143,45 @@ fn parse_jisho_lookup(query: &str, response: &JishoResponse) -> Option<AutoFillR
 
 #[cfg(test)]
 mod tests {
+    use std::sync::{
+        Arc,
+        atomic::{AtomicUsize, Ordering},
+    };
+
     use super::*;
 
-    enum StaticBehavior {
+    enum ProbeBehavior {
         Hit {
             reading: &'static str,
             meaning: &'static str,
         },
         Miss,
-        Fail,
+        Fail {
+            message: &'static str,
+        },
     }
 
-    struct StaticBackend {
+    struct ProbeBackend {
         name:     &'static str,
-        behavior: StaticBehavior,
+        behavior: ProbeBehavior,
+        calls:    Arc<AtomicUsize>,
     }
 
     #[async_trait]
-    impl DictionaryBackend for StaticBackend {
+    impl DictionaryBackend for ProbeBackend {
         fn name(&self) -> &'static str { self.name }
 
         async fn lookup(&self, _word: &str) -> Result<Option<AutoFillResult>> {
+            self.calls.fetch_add(1, Ordering::SeqCst);
             match self.behavior {
-                StaticBehavior::Hit { reading, meaning } => Ok(Some(AutoFillResult {
+                ProbeBehavior::Hit { reading, meaning } => Ok(Some(AutoFillResult {
                     reading: reading.to_string(),
                     meaning: meaning.to_string(),
                 })),
-                StaticBehavior::Miss => Ok(None),
-                StaticBehavior::Fail => error::WordLookupSnafu {
+                ProbeBehavior::Miss => Ok(None),
+                ProbeBehavior::Fail { message } => error::WordLookupSnafu {
                     word:    "x".to_string(),
-                    message: "upstream error".to_string(),
+                    message: message.to_string(),
                 }
                 .fail(),
             }
@@ -232,41 +241,51 @@ mod tests {
 
     #[tokio::test]
     async fn service_uses_first_successful_backend() {
+        let primary_calls = Arc::new(AtomicUsize::new(0));
+        let secondary_calls = Arc::new(AtomicUsize::new(0));
         let service = DictionaryService::with_backends(vec![
-            Box::new(StaticBackend {
+            Box::new(ProbeBackend {
                 name:     "primary",
-                behavior: StaticBehavior::Hit {
+                behavior: ProbeBehavior::Hit {
                     reading: "せいこう",
                     meaning: "success",
                 },
+                calls:    Arc::clone(&primary_calls),
             }),
-            Box::new(StaticBackend {
+            Box::new(ProbeBackend {
                 name:     "secondary",
-                behavior: StaticBehavior::Hit {
+                behavior: ProbeBehavior::Hit {
                     reading: "fallback",
                     meaning: "fallback",
                 },
+                calls:    Arc::clone(&secondary_calls),
             }),
         ]);
 
         let result = service.lookup("成功").await.expect("lookup should succeed");
         assert_eq!(result.reading, "せいこう");
         assert_eq!(result.meaning, "success");
+        assert_eq!(primary_calls.load(Ordering::SeqCst), 1);
+        assert_eq!(secondary_calls.load(Ordering::SeqCst), 0);
     }
 
     #[tokio::test]
     async fn service_falls_back_when_backend_returns_none() {
+        let empty_calls = Arc::new(AtomicUsize::new(0));
+        let fallback_calls = Arc::new(AtomicUsize::new(0));
         let service = DictionaryService::with_backends(vec![
-            Box::new(StaticBackend {
+            Box::new(ProbeBackend {
                 name:     "empty",
-                behavior: StaticBehavior::Miss,
+                behavior: ProbeBehavior::Miss,
+                calls:    Arc::clone(&empty_calls),
             }),
-            Box::new(StaticBackend {
+            Box::new(ProbeBackend {
                 name:     "fallback",
-                behavior: StaticBehavior::Hit {
+                behavior: ProbeBehavior::Hit {
                     reading: "ねこ",
                     meaning: "cat",
                 },
+                calls:    Arc::clone(&fallback_calls),
             }),
         ]);
 
@@ -276,18 +295,26 @@ mod tests {
             .expect("fallback lookup should succeed");
         assert_eq!(result.reading, "ねこ");
         assert_eq!(result.meaning, "cat");
+        assert_eq!(empty_calls.load(Ordering::SeqCst), 1);
+        assert_eq!(fallback_calls.load(Ordering::SeqCst), 1);
     }
 
     #[tokio::test]
     async fn service_returns_word_lookup_when_all_backends_fail() {
+        let empty_calls = Arc::new(AtomicUsize::new(0));
+        let broken_calls = Arc::new(AtomicUsize::new(0));
         let service = DictionaryService::with_backends(vec![
-            Box::new(StaticBackend {
+            Box::new(ProbeBackend {
                 name:     "empty",
-                behavior: StaticBehavior::Miss,
+                behavior: ProbeBehavior::Miss,
+                calls:    Arc::clone(&empty_calls),
             }),
-            Box::new(StaticBackend {
+            Box::new(ProbeBackend {
                 name:     "broken",
-                behavior: StaticBehavior::Fail,
+                behavior: ProbeBehavior::Fail {
+                    message: "upstream error",
+                },
+                calls:    Arc::clone(&broken_calls),
             }),
         ]);
 
@@ -298,5 +325,8 @@ mod tests {
         let msg = err.to_string();
         assert!(msg.contains("empty: no result"));
         assert!(msg.contains("broken:"));
+        assert!(msg.contains("upstream error"));
+        assert_eq!(empty_calls.load(Ordering::SeqCst), 1);
+        assert_eq!(broken_calls.load(Ordering::SeqCst), 1);
     }
 }
