@@ -11,20 +11,19 @@ use crate::error::{self, Result};
 /// Kokoro ONNX inference backend for high-quality multi-lingual TTS.
 pub struct KokoroBackend {
     voice: String,
+    speed: f32,
 }
 
 impl KokoroBackend {
     /// Create a new Kokoro backend for the given voice style.
-    pub const fn new(voice: String) -> Self { Self { voice } }
+    pub const fn new(voice: String, speed: f32) -> Self { Self { voice, speed } }
 }
 
 #[async_trait]
 impl TtsBackend for KokoroBackend {
     async fn synthesize(&self, text: &str, output: &Path) -> Result<()> {
-        crate::kokoro::synthesize(text, "ja", &self.voice, output)
+        crate::kokoro::synthesize(text, "ja", &self.voice, self.speed, output)
             .await
             .context(error::KokoroSnafu)
     }
-
-    fn name(&self) -> &'static str { "kokoro" }
 }

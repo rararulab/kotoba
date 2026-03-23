@@ -40,6 +40,21 @@ pub enum ExportFormat {
     Anki,
 }
 
+/// Performance style for TTS delivery.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, ValueEnum)]
+pub enum PlayStyle {
+    /// Minimal expression changes.
+    Neutral,
+    /// Character-like expressive conversational style.
+    Character,
+    /// More dramatic performance.
+    Dramatic,
+    /// Softer and gentler delivery.
+    Soft,
+    /// Brighter and faster delivery.
+    Energetic,
+}
+
 /// SRS review quality rating.
 #[derive(Clone, Debug, ValueEnum)]
 pub enum ReviewQuality {
@@ -141,7 +156,13 @@ pub enum Command {
     /// Play pronunciation via TTS
     Play {
         /// The word to pronounce
-        word: String,
+        word:   String,
+        /// If set, immediately play the generated audio via local output device
+        #[arg(long)]
+        enable: bool,
+        /// TTS performance style
+        #[arg(long, value_enum, default_value = "character")]
+        style:  PlayStyle,
     },
     /// Manage TTS voice selection
     Voice {
@@ -156,7 +177,7 @@ pub enum Command {
     },
 
     // ── System ───────────────────────────────────────────────
-    /// Download VOICEVOX Engine, initialize DB, and configure environment
+    /// Download VOICEVOX, initialize DB, and set default Kokoro+RVC voice
     Setup,
     /// Check all dependencies (DB, VOICEVOX, models, disk space)
     Doctor {
@@ -226,6 +247,42 @@ pub enum VoiceAction {
         /// Voice name or ID
         name: String,
     },
+    /// Manage voice tone presets (prosody and RVC tuning)
+    Tone {
+        #[command(subcommand)]
+        action: VoiceToneAction,
+    },
+    /// Manage RVC voice conversion models
+    Rvc {
+        #[command(subcommand)]
+        action: VoiceRvcAction,
+    },
+}
+
+/// RVC model management subcommands.
+#[derive(Subcommand)]
+pub enum VoiceRvcAction {
+    /// List downloaded RVC models
+    List,
+    /// Set the active RVC model (supports fuzzy matching)
+    Set {
+        /// Model name or substring (e.g. "miku")
+        name: String,
+    },
+    /// Disable RVC voice conversion
+    Off,
+}
+
+/// Voice tone preset subcommands.
+#[derive(Subcommand)]
+pub enum VoiceToneAction {
+    /// List available tone presets
+    List,
+    /// Apply a tone preset
+    Set {
+        /// Preset name (e.g. balanced, genki, kawaii, miku)
+        name: String,
+    },
 }
 
 /// HuggingFace model management subcommands.
@@ -274,5 +331,119 @@ mod tests {
 
         assert_eq!(reading.as_deref(), Some("せいこう"));
         assert_eq!(meaning.as_deref(), Some("success"));
+    }
+
+    #[test]
+    fn play_command_enable_defaults_to_false() {
+        let cli = Cli::try_parse_from(["kotoba", "play", "成功"]).expect("parse should succeed");
+        let Command::Play {
+            word,
+            enable,
+            style,
+        } = cli.command
+        else {
+            panic!("expected play command");
+        };
+
+        assert_eq!(word, "成功");
+        assert!(!enable);
+        assert_eq!(style, PlayStyle::Character);
+    }
+
+    #[test]
+    fn play_command_supports_enable_flag() {
+        let cli = Cli::try_parse_from(["kotoba", "play", "成功", "--enable"])
+            .expect("parse should succeed");
+        let Command::Play {
+            word,
+            enable,
+            style,
+        } = cli.command
+        else {
+            panic!("expected play command");
+        };
+
+        assert_eq!(word, "成功");
+        assert!(enable);
+        assert_eq!(style, PlayStyle::Character);
+    }
+
+    #[test]
+    fn play_command_style_defaults_to_character() {
+        let cli = Cli::try_parse_from(["kotoba", "play", "成功"]).expect("parse should succeed");
+        let Command::Play { style, .. } = cli.command else {
+            panic!("expected play command");
+        };
+        assert_eq!(style, PlayStyle::Character);
+    }
+
+    #[test]
+    fn play_command_accepts_dramatic_style() {
+        let cli = Cli::try_parse_from(["kotoba", "play", "成功", "--style", "dramatic"])
+            .expect("parse should succeed");
+        let Command::Play { style, .. } = cli.command else {
+            panic!("expected play command");
+        };
+        assert_eq!(style, PlayStyle::Dramatic);
+    }
+
+    #[test]
+    fn voice_tone_set_command_parses() {
+        let cli = Cli::try_parse_from(["kotoba", "voice", "tone", "set", "miku"])
+            .expect("parse should succeed");
+
+        let Command::Voice { action } = cli.command else {
+            panic!("expected voice command");
+        };
+        let VoiceAction::Tone { action } = action else {
+            panic!("expected voice tone command");
+        };
+        let VoiceToneAction::Set { name } = action else {
+            panic!("expected voice tone set command");
+        };
+
+        assert_eq!(name, "miku");
+    }
+
+    #[test]
+    fn voice_rvc_list_command_parses() {
+        let cli =
+            Cli::try_parse_from(["kotoba", "voice", "rvc", "list"]).expect("parse should succeed");
+        let Command::Voice { action } = cli.command else {
+            panic!("expected voice command");
+        };
+        let VoiceAction::Rvc { action } = action else {
+            panic!("expected voice rvc command");
+        };
+        assert!(matches!(action, VoiceRvcAction::List));
+    }
+
+    #[test]
+    fn voice_rvc_set_command_parses() {
+        let cli = Cli::try_parse_from(["kotoba", "voice", "rvc", "set", "miku"])
+            .expect("parse should succeed");
+        let Command::Voice { action } = cli.command else {
+            panic!("expected voice command");
+        };
+        let VoiceAction::Rvc { action } = action else {
+            panic!("expected voice rvc command");
+        };
+        let VoiceRvcAction::Set { name } = action else {
+            panic!("expected set action");
+        };
+        assert_eq!(name, "miku");
+    }
+
+    #[test]
+    fn voice_rvc_off_command_parses() {
+        let cli =
+            Cli::try_parse_from(["kotoba", "voice", "rvc", "off"]).expect("parse should succeed");
+        let Command::Voice { action } = cli.command else {
+            panic!("expected voice command");
+        };
+        let VoiceAction::Rvc { action } = action else {
+            panic!("expected voice rvc command");
+        };
+        assert!(matches!(action, VoiceRvcAction::Off));
     }
 }

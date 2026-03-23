@@ -15,11 +15,13 @@ git clone https://github.com/rararulab/kotoba && cd kotoba && cargo install --pa
 ## Quick Start
 
 ```bash
-kotoba setup                             # Download VOICEVOX, init DB, configure env
+kotoba setup                             # Download VOICEVOX, init DB, configure default Kokoro+RVC voice
 kotoba add 成功 --level n5               # Add vocabulary (auto-fill reading + meaning)
 kotoba review                            # Show due reviews
 kotoba seen 成功 recalled                 # Record review (forgot/recognized/recalled)
 kotoba play 成功                          # Pronounce with TTS
+kotoba play 成功 --enable                 # Pronounce and play immediately
+kotoba play "今日は本当に嬉しい！" --style dramatic --enable
 ```
 
 ## Commands
@@ -51,10 +53,17 @@ kotoba seen --grammar ～ている recognized # Record grammar review
 
 ```bash
 kotoba play 成功                          # Pronounce with current voice
+kotoba play 成功 --enable                 # Play via local output device immediately
+kotoba play "今日は本当に嬉しい！" --style character  # Character-like expressive delivery
+kotoba play "こんにちは" --style neutral   # Flatter, more stable delivery
+kotoba play "こんにちは" --style soft      # Gentler and slower delivery
+kotoba voice tone list                   # List tone presets
+kotoba voice tone set balanced           # Apply a tone preset
 kotoba voice list                        # List available voices
 kotoba voice set voicevox:3              # Use VOICEVOX speaker 3
 kotoba voice set kokoro:af_heart         # Use Kokoro ONNX (local, no server needed)
 kotoba voice set kokoro:af_heart+rvc:naruto  # Kokoro + RVC voice conversion
+kotoba config set voice.speed 0.85       # Slow down speech speed
 ```
 
 ### Model Management
@@ -69,8 +78,9 @@ kotoba huggingface list                  # List downloaded models
 ### System
 
 ```bash
-kotoba setup                             # Full setup (VOICEVOX + DB + config)
+kotoba setup                             # Full setup (VOICEVOX + DB + default Kokoro+RVC voice)
 kotoba doctor                            # Health check all dependencies
+kotoba doctor --json                     # Machine-readable health report
 kotoba config set voice.active kokoro:af_heart  # Set config values
 ```
 
@@ -120,6 +130,8 @@ kotoba config set rvc.python /path/to/python3     # config (permanent)
 ```
 
 Run `kotoba doctor` to verify setup.
+
+`play --style` supports `neutral`, `character` (default), `soft`, `dramatic`, `energetic`.
 
 ## License
 

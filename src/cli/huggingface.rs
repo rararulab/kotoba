@@ -127,12 +127,7 @@ fn find_rvc_files(
     let candidates: Vec<&str> = siblings
         .iter()
         .map(|s| s.rfilename.as_str())
-        .filter(|name| {
-            subpath.is_none_or(|prefix| {
-                let normalized = prefix.strip_suffix('/').unwrap_or(prefix);
-                name.starts_with(normalized) && name.as_bytes().get(normalized.len()) == Some(&b'/')
-            })
-        })
+        .filter(|name| matches_subpath(name, subpath))
         .collect();
 
     // Find the shallowest .pth file (fewest '/' separators)
@@ -157,6 +152,122 @@ fn find_rvc_files(
         .map(|s| (*s).to_string());
 
     (pth, index)
+}
+
+/// Return true when `name` is either exactly `subpath` or located under it.
+fn matches_subpath(name: &str, subpath: Option<&str>) -> bool {
+    subpath.is_none_or(|prefix| {
+        let normalized = prefix.strip_suffix('/').unwrap_or(prefix);
+        name == normalized
+            || (name.starts_with(normalized)
+                && name.as_bytes().get(normalized.len()) == Some(&b'/'))
+    })
+}
+
+/// Locate a `.zip` archive that may contain RVC files.
+///
+/// When `subpath` is `Some`, only zip files under that prefix are considered.
+fn find_rvc_zip_files(siblings: &[HfSibling], subpath: Option<&str>) -> Vec<String> {
+    let mut files: Vec<String> = siblings
+        .iter()
+        .map(|s| s.rfilename.as_str())
+        .filter(|name| matches_subpath(name, subpath))
+        .filter(|name| {
+            Path::new(name)
+                .extension()
+                .is_some_and(|ext| ext.eq_ignore_ascii_case("zip"))
+        })
+        .map(ToString::to_string)
+        .collect();
+
+    files.sort_by(|a, b| {
+        let rank = |name: &str| -> (i32, usize, String) {
+            let lower = name.to_ascii_lowercase();
+            let mut score = 0_i32;
+            // Avoid repository source bundles when better RVC candidates exist.
+            if lower.contains("main.zip") || lower.contains("source") {
+                score += 20;
+            }
+            if lower.contains("rvc") {
+                score -= 5;
+            }
+            if lower.contains("epoch") {
+                score -= 3;
+            }
+            (score, name.matches('/').count(), lower)
+        };
+        rank(a).cmp(&rank(b))
+    });
+
+    files
+}
+
+/// Extract `model.pth` and optional `model.index` from a downloaded zip
+/// archive.
+///
+/// Returns the selected member names from inside the archive.
+fn extract_rvc_files_from_zip(
+    zip_path: &Path,
+    pth_dest: &Path,
+    index_dest: &Path,
+) -> Result<(String, Option<String>)> {
+    let zip_err = |e: zip::result::ZipError| {
+        error::ZipSnafu {
+            message: e.to_string(),
+        }
+        .build()
+    };
+
+    let file = std::fs::File::open(zip_path).context(error::IoSnafu)?;
+    let mut archive = zip::ZipArchive::new(file).map_err(zip_err)?;
+
+    let mut members: Vec<String> = Vec::new();
+    for i in 0..archive.len() {
+        let entry = archive.by_index(i).map_err(&zip_err)?;
+        if !entry.is_dir() {
+            members.push(entry.name().to_string());
+        }
+    }
+
+    let pth_member = members
+        .iter()
+        .filter(|name| {
+            Path::new(name)
+                .extension()
+                .is_some_and(|ext| ext.eq_ignore_ascii_case("pth"))
+        })
+        .min_by_key(|name| name.matches('/').count())
+        .cloned()
+        .ok_or_else(|| {
+            error::ZipSnafu {
+                message: format!("no .pth file found in zip archive: {}", zip_path.display()),
+            }
+            .build()
+        })?;
+
+    let index_member = members
+        .iter()
+        .filter(|name| {
+            Path::new(name)
+                .extension()
+                .is_some_and(|ext| ext.eq_ignore_ascii_case("index"))
+        })
+        .min_by_key(|name| name.matches('/').count())
+        .cloned();
+
+    {
+        let mut src = archive.by_name(&pth_member).map_err(&zip_err)?;
+        let mut dst = std::fs::File::create(pth_dest).context(error::IoSnafu)?;
+        std::io::copy(&mut src, &mut dst).context(error::IoSnafu)?;
+    }
+
+    if let Some(index_name) = &index_member {
+        let mut src = archive.by_name(index_name).map_err(zip_err)?;
+        let mut dst = std::fs::File::create(index_dest).context(error::IoSnafu)?;
+        std::io::copy(&mut src, &mut dst).context(error::IoSnafu)?;
+    }
+
+    Ok((pth_member, index_member))
 }
 
 /// List downloaded `HuggingFace` models.
@@ -228,7 +339,7 @@ async fn add_kokoro() -> Result<ModelAddResult> {
     }
 
     eprintln!("kokoro model saved to: {}", model_dir.display());
-    eprintln!("use `kotoba voice set kokoro:<voice>` to activate");
+    eprintln!("use `kotoba voice set kokoro:af_heart` to activate");
 
     Ok(ModelAddResult {
         model: "kokoro".to_string(),
@@ -241,6 +352,7 @@ async fn add_kokoro() -> Result<ModelAddResult> {
 /// Accepts `owner/repo` or `owner/repo:subpath` syntax. Queries the HF API to
 /// discover `.pth` and `.index` files, then downloads them as `model.pth` /
 /// `model.index` into `~/.kotoba/models/rvc/{model_name}/`.
+#[allow(clippy::too_many_lines)]
 async fn add_rvc(input: &str) -> Result<ModelAddResult> {
     // Parse optional subpath: "owner/repo:subpath" or just "owner/repo"
     let (repo_id, subpath) = match input.find(':') {
@@ -267,36 +379,97 @@ async fn add_rvc(input: &str) -> Result<ModelAddResult> {
     let siblings = query_repo_files(repo_id).await?;
     let (pth_file, index_file) = find_rvc_files(&siblings, subpath);
 
-    let pth_file = pth_file.ok_or_else(|| {
-        error::RvcModelNotFoundSnafu {
-            repo_id: repo_id.to_string(),
-            subpath: subpath.unwrap_or("subpath").to_string(),
-        }
-        .build()
-    })?;
-
     std::fs::create_dir_all(&model_dir).context(error::IoSnafu)?;
 
     let client = crate::http::download_client();
-    let pth_url = format!("https://huggingface.co/{repo_id}/resolve/main/{pth_file}");
 
-    eprintln!("downloading rvc model: {pth_file}...");
-    if let Err(e) = download_file(client, &pth_url, &pth_path).await {
-        let _ = std::fs::remove_dir_all(&model_dir);
-        return Err(e);
-    }
+    if let Some(pth_file) = pth_file {
+        let pth_url = format!("https://huggingface.co/{repo_id}/resolve/main/{pth_file}");
+        eprintln!("downloading rvc model: {pth_file}...");
+        if let Err(e) = download_file(client, &pth_url, &pth_path).await {
+            let _ = std::fs::remove_dir_all(&model_dir);
+            return Err(e);
+        }
 
-    // Download .index file if discovered (optional for RVC)
-    if let Some(index_file) = &index_file {
-        let index_url = format!("https://huggingface.co/{repo_id}/resolve/main/{index_file}");
-        let index_dest = model_dir.join("model.index");
-        eprintln!("downloading rvc index: {index_file}...");
-        // Index is optional — don't fail the whole operation if it errors
-        let _ = download_file(client, &index_url, &index_dest).await;
+        // Download .index file if discovered (optional for RVC)
+        if let Some(index_file) = &index_file {
+            let index_url = format!("https://huggingface.co/{repo_id}/resolve/main/{index_file}");
+            let index_dest = model_dir.join("model.index");
+            eprintln!("downloading rvc index: {index_file}...");
+            // Index is optional — don't fail the whole operation if it errors
+            let _ = download_file(client, &index_url, &index_dest).await;
+        }
+    } else {
+        let zip_files = find_rvc_zip_files(&siblings, subpath);
+        if zip_files.is_empty() {
+            return error::RvcModelNotFoundSnafu {
+                repo_id: repo_id.to_string(),
+                subpath: subpath.unwrap_or("subpath").to_string(),
+            }
+            .fail();
+        }
+
+        let index_path = model_dir.join("model.index");
+        let zip_path = model_dir.join("model.zip");
+        let mut extracted = false;
+        let mut last_no_pth_zip_err: Option<crate::error::KotobaError> = None;
+
+        for zip_file in zip_files {
+            let _ = std::fs::remove_file(&zip_path);
+            let _ = std::fs::remove_file(&pth_path);
+            let _ = std::fs::remove_file(&index_path);
+
+            let zip_url = format!("https://huggingface.co/{repo_id}/resolve/main/{zip_file}");
+            eprintln!("downloading rvc archive: {zip_file}...");
+            if let Err(e) = download_file(client, &zip_url, &zip_path).await {
+                let _ = std::fs::remove_dir_all(&model_dir);
+                return Err(e);
+            }
+
+            eprintln!("extracting rvc files from archive...");
+            match extract_rvc_files_from_zip(&zip_path, &pth_path, &index_path) {
+                Ok((pth_member, index_member)) => {
+                    eprintln!("  extracted model: {pth_member}");
+                    if let Some(index_member) = index_member {
+                        eprintln!("  extracted index: {index_member}");
+                    } else {
+                        eprintln!("  no .index file found in archive (optional)");
+                    }
+                    extracted = true;
+                    break;
+                }
+                Err(e) => {
+                    if subpath.is_none()
+                        && let error::KotobaError::Zip { message } = &e
+                        && message.starts_with("no .pth file found in zip archive:")
+                    {
+                        eprintln!("  skipping archive without .pth: {zip_file}");
+                        last_no_pth_zip_err = Some(e);
+                        continue;
+                    }
+                    let _ = std::fs::remove_dir_all(&model_dir);
+                    return Err(e);
+                }
+            }
+        }
+
+        if !extracted {
+            let _ = std::fs::remove_dir_all(&model_dir);
+            if let Some(e) = last_no_pth_zip_err {
+                return Err(e);
+            }
+            return error::RvcModelNotFoundSnafu {
+                repo_id: repo_id.to_string(),
+                subpath: subpath.unwrap_or("subpath").to_string(),
+            }
+            .fail();
+        }
+
+        let _ = std::fs::remove_file(&zip_path);
     }
 
     eprintln!("rvc model saved to: {}", model_dir.display());
-    eprintln!("use `kotoba voice set kokoro:<voice>+rvc:{model_name}` to activate");
+    eprintln!("use `kotoba config set rvc.model {model_name}` to activate");
 
     Ok(ModelAddResult {
         model: model_name.to_string(),
@@ -361,6 +534,8 @@ pub async fn add(repo_id: &str) -> Result<ModelAddResult> {
 
 #[cfg(test)]
 mod tests {
+    use std::io::Write as _;
+
     use super::*;
 
     /// Helper to build a vec of `HfSibling` from string slices.
@@ -423,6 +598,71 @@ mod tests {
         let sibs = siblings(&["models/AB/x.pth", "models/A/y.pth"]);
         let (pth, _) = find_rvc_files(&sibs, Some("models/A"));
         assert_eq!(pth.as_deref(), Some("models/A/y.pth"));
+    }
+
+    #[test]
+    fn find_zip_with_subpath_filter() {
+        let sibs = siblings(&[
+            "packs/A/rvc.zip",
+            "packs/B/rvc.zip",
+            "packs/A/model.pth",
+            "packs/A/model.index",
+        ]);
+        let zips = find_rvc_zip_files(&sibs, Some("packs/A"));
+        assert_eq!(zips.first().map(String::as_str), Some("packs/A/rvc.zip"));
+    }
+
+    #[test]
+    fn find_zip_with_exact_path_filter() {
+        let sibs = siblings(&[
+            "LanguageLeapAI-main.zip",
+            "by swapno Nakano Ichika (CV Hanazawa Kana ) From - The Quintessential Quintuplets \
+             300 Epochs (RVC v2).zip",
+        ]);
+        let zips = find_rvc_zip_files(
+            &sibs,
+            Some(
+                "by swapno Nakano Ichika (CV Hanazawa Kana ) From - The Quintessential \
+                 Quintuplets 300 Epochs (RVC v2).zip",
+            ),
+        );
+        assert_eq!(
+            zips.first().map(String::as_str),
+            Some(
+                "by swapno Nakano Ichika (CV Hanazawa Kana ) From - The Quintessential \
+                 Quintuplets 300 Epochs (RVC v2).zip"
+            )
+        );
+    }
+
+    #[test]
+    fn extract_rvc_from_zip_writes_model_and_index() {
+        let temp = tempfile::tempdir().expect("temp dir");
+        let zip_path = temp.path().join("voice.zip");
+        let pth_path = temp.path().join("model.pth");
+        let index_path = temp.path().join("model.index");
+
+        {
+            let file = std::fs::File::create(&zip_path).expect("create zip");
+            let mut zip = zip::ZipWriter::new(file);
+            let opts = zip::write::SimpleFileOptions::default();
+            zip.start_file("nested/voice.pth", opts).expect("start pth");
+            zip.write_all(b"pth-bytes").expect("write pth");
+            zip.start_file("nested/voice.index", opts)
+                .expect("start index");
+            zip.write_all(b"index-bytes").expect("write index");
+            zip.finish().expect("finish zip");
+        }
+
+        let (pth_member, index_member) =
+            extract_rvc_files_from_zip(&zip_path, &pth_path, &index_path).expect("extract");
+        assert_eq!(pth_member, "nested/voice.pth");
+        assert_eq!(index_member.as_deref(), Some("nested/voice.index"));
+        assert_eq!(std::fs::read(&pth_path).expect("read pth"), b"pth-bytes");
+        assert_eq!(
+            std::fs::read(&index_path).expect("read index"),
+            b"index-bytes"
+        );
     }
 
     #[test]

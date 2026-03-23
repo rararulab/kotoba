@@ -273,7 +273,7 @@ fn check_rvc_models() -> Check {
         Check {
             name:   "rvc_models".into(),
             status: Status::Ok,
-            detail: "none (optional — add with `kotoba huggingface add rvc:<repo>`)".into(),
+            detail: "none (optional — add with `kotoba huggingface add rvc:owner/repo`)".into(),
         }
     }
 }

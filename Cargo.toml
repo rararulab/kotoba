@@ -16,6 +16,7 @@ dirs = "6"
 futures-util = "0.3"
 indicatif = "0.17"
 reqwest = { version = "0.13", features = ["json", "multipart", "query", "stream"] }
+rodio = "0.22"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 sha2 = "0.10"
@@ -29,6 +30,7 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 
 ort = { version = "2.0.0-rc.12", features = ["ndarray"] }
 ndarray = "0.17"
+ndarray-npy = "0.10"
 wana_kana = "4.0.0"
 
 [dev-dependencies]

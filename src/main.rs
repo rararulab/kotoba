@@ -143,18 +143,35 @@ async fn run() -> std::result::Result<(), Box<dyn std::error::Error>> {
             let progress = db.progress(weekly).await?;
             println!("{}", serde_json::to_string_pretty(&progress)?);
         }
-        Command::Play { word } => {
-            let path = cli::play::play_word(&word).await?;
+        Command::Play {
+            word,
+            enable,
+            style,
+        } => {
+            let romaji = romaji::to_romaji_natural(&word).await;
+            let path = cli::play::play_word(&word, enable, style).await?;
             println!(
                 "{}",
-                serde_json::json!({"ok": true, "action": "play", "path": path.display().to_string()})
+                serde_json::json!({
+                    "ok": true,
+                    "action": "play",
+                    "path": path.display().to_string(),
+                    "style": format!("{style:?}").to_lowercase(),
+                    "romaji": romaji
+                })
             );
         }
         Command::Setup => {
             let result = cli::setup::run(&db).await?;
             println!(
                 "{}",
-                serde_json::json!({"ok": true, "action": "setup", "db_path": result.db_path, "voicevox_installed": result.voicevox_installed})
+                serde_json::json!({
+                    "ok": true,
+                    "action": "setup",
+                    "db_path": result.db_path,
+                    "voicevox_installed": result.voicevox_installed,
+                    "voicevox_running": result.voicevox_running
+                })
             );
         }
         Command::Doctor { json } => {
@@ -171,6 +188,42 @@ async fn run() -> std::result::Result<(), Box<dyn std::error::Error>> {
                     serde_json::json!({"ok": true, "action": "voice_set", "name": name})
                 );
             }
+            cli::VoiceAction::Tone { action } => match action {
+                cli::VoiceToneAction::List => {
+                    cli::voice::list_tones()?;
+                }
+                cli::VoiceToneAction::Set { name } => {
+                    let applied = cli::voice::set_tone(&name)?;
+                    println!(
+                        "{}",
+                        serde_json::json!({
+                            "ok": true,
+                            "action": "voice_tone_set",
+                            "preset": applied.name,
+                            "voice_speed": applied.voice_speed,
+                            "rvc_pitch": applied.rvc_pitch,
+                            "rvc_pitch_algo": applied.rvc_pitch_algo,
+                            "rvc_index_influence": applied.rvc_index_influence
+                        })
+                    );
+                }
+            },
+            cli::VoiceAction::Rvc { action } => match action {
+                cli::VoiceRvcAction::List => {
+                    cli::voice::list_rvc()?;
+                }
+                cli::VoiceRvcAction::Set { name } => {
+                    let resolved = cli::voice::set_rvc(&name)?;
+                    println!(
+                        "{}",
+                        serde_json::json!({"ok": true, "action": "rvc_set", "model": resolved})
+                    );
+                }
+                cli::VoiceRvcAction::Off => {
+                    cli::voice::off_rvc()?;
+                    println!("{}", serde_json::json!({"ok": true, "action": "rvc_off"}));
+                }
+            },
         },
         Command::Huggingface { action } => match action {
             cli::HuggingFaceAction::Add { repo_id } => {
@@ -239,9 +292,24 @@ async fn run() -> std::result::Result<(), Box<dyn std::error::Error>> {
 fn set_config_field(cfg: &mut app_config::AppConfig, key: &str, value: &str) {
     match key {
         "voice.active" => cfg.voice.active = value.to_string(),
+        "voice.speed" => match value.parse::<f64>() {
+            Ok(v) => cfg.voice.speed = v,
+            Err(_) => eprintln!("warning: invalid float for voice.speed: {value}"),
+        },
         "voicevox.version" => cfg.voicevox.version = value.to_string(),
         "voicevox.url" => cfg.voicevox.url = value.to_string(),
         "voicevox.speaker" => cfg.voicevox.speaker = value.to_string(),
+        "rvc.model" => cfg.rvc.model = value.to_string(),
+        "rvc.python" => cfg.rvc.python = value.to_string(),
+        "rvc.pitch" => match value.parse::<i32>() {
+            Ok(v) => cfg.rvc.pitch = v,
+            Err(_) => eprintln!("warning: invalid integer for rvc.pitch: {value}"),
+        },
+        "rvc.pitch_algo" => cfg.rvc.pitch_algo = value.to_string(),
+        "rvc.index_influence" => match value.parse::<f64>() {
+            Ok(v) => cfg.rvc.index_influence = v.clamp(0.0, 1.0),
+            Err(_) => eprintln!("warning: invalid float for rvc.index_influence: {value}"),
+        },
         _ => eprintln!("warning: unknown config key: {key}"),
     }
 }
@@ -250,9 +318,15 @@ fn set_config_field(cfg: &mut app_config::AppConfig, key: &str, value: &str) {
 fn get_config_field(cfg: &app_config::AppConfig, key: &str) -> Option<String> {
     match key {
         "voice.active" => Some(cfg.voice.active.clone()),
+        "voice.speed" => Some(cfg.voice.speed.to_string()),
         "voicevox.version" => Some(cfg.voicevox.version.clone()),
         "voicevox.url" => Some(cfg.voicevox.url.clone()),
         "voicevox.speaker" => Some(cfg.voicevox.speaker.clone()),
+        "rvc.model" => Some(cfg.rvc.model.clone()),
+        "rvc.python" => Some(cfg.rvc.python.clone()),
+        "rvc.pitch" => Some(cfg.rvc.pitch.to_string()),
+        "rvc.pitch_algo" => Some(cfg.rvc.pitch_algo.clone()),
+        "rvc.index_influence" => Some(cfg.rvc.index_influence.to_string()),
         _ => None,
     }
 }
@@ -261,8 +335,17 @@ fn get_config_field(cfg: &app_config::AppConfig, key: &str) -> Option<String> {
 fn config_as_map(cfg: &app_config::AppConfig) -> Vec<(String, String)> {
     vec![
         ("voice.active".to_string(), cfg.voice.active.clone()),
+        ("voice.speed".to_string(), cfg.voice.speed.to_string()),
         ("voicevox.version".to_string(), cfg.voicevox.version.clone()),
         ("voicevox.url".to_string(), cfg.voicevox.url.clone()),
         ("voicevox.speaker".to_string(), cfg.voicevox.speaker.clone()),
+        ("rvc.model".to_string(), cfg.rvc.model.clone()),
+        ("rvc.python".to_string(), cfg.rvc.python.clone()),
+        ("rvc.pitch".to_string(), cfg.rvc.pitch.to_string()),
+        ("rvc.pitch_algo".to_string(), cfg.rvc.pitch_algo.clone()),
+        (
+            "rvc.index_influence".to_string(),
+            cfg.rvc.index_influence.to_string(),
+        ),
     ]
 }

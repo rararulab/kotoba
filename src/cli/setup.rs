@@ -1,6 +1,10 @@
-//! `kotoba setup` — download VOICEVOX Engine and initialize environment.
+//! `kotoba setup` — initialize environment and configure default voice.
 
-use std::io::{Read as _, Write};
+use std::{
+    io::{Read as _, Write},
+    process::{Command, Stdio},
+    time::Duration,
+};
 
 use futures_util::StreamExt;
 use indicatif::{ProgressBar, ProgressStyle};
@@ -10,9 +14,16 @@ use sha2::{Digest, Sha256};
 use snafu::ResultExt;
 
 use crate::{
+    app_config::{self, AppConfig},
     db::Database,
     error::{self, Result},
 };
+
+const DEFAULT_SETUP_KOKORO_VOICE: &str = "jf_alpha";
+const DEFAULT_SETUP_RVC_SPEC: &str = "rvc:lexaizero/ReuploadModel:by swapno Nakano Ichika (CV \
+                                      Hanazawa Kana ) From - The Quintessential Quintuplets 300 \
+                                      Epochs (RVC v2).zip";
+const DEFAULT_SETUP_VOICE_SPEED: f64 = 0.90;
 
 /// Result of running the setup command.
 #[derive(Debug, Serialize)]
@@ -21,6 +32,8 @@ pub struct SetupResult {
     pub db_path:            String,
     /// Whether VOICEVOX Engine is installed after setup.
     pub voicevox_installed: bool,
+    /// Whether VOICEVOX API is reachable after setup.
+    pub voicevox_running:   bool,
 }
 
 fn voicevox_download_url(version: &str) -> String {
@@ -50,13 +63,16 @@ pub fn is_voicevox_installed() -> bool {
     dir.exists() && dir.join("run").exists()
 }
 
-/// Run full setup: download VOICEVOX Engine + initialize DB.
+/// Run full setup: initialize DB, install VOICEVOX, and configure default
+/// Kokoro+RVC voice.
 pub async fn run(db: &Database) -> Result<SetupResult> {
     eprintln!("initializing database...");
     db.init().await?;
     eprintln!("  database ready at {}", db.path().display());
 
-    let version = crate::app_config::load().voicevox.version.clone();
+    let cfg = crate::app_config::load();
+    let version = cfg.voicevox.version.clone();
+    let voicevox_url = std::env::var("VOICEVOX_URL").unwrap_or_else(|_| cfg.voicevox.url.clone());
 
     if is_voicevox_installed() {
         eprintln!("  voicevox engine already installed");
@@ -64,12 +80,136 @@ pub async fn run(db: &Database) -> Result<SetupResult> {
         download_voicevox(&version).await?;
     }
 
+    eprintln!("  ensuring default Kokoro model...");
+    crate::cli::huggingface::add("kokoro").await?;
+    eprintln!("  ensuring default Hanazawa RVC model...");
+    let rvc_result = crate::cli::huggingface::add(DEFAULT_SETUP_RVC_SPEC).await?;
+
+    let mut updated = app_config::load().clone();
+    apply_default_voice_preset(&mut updated, &rvc_result.model);
+    app_config::save(&updated).context(error::IoSnafu)?;
+    eprintln!(
+        "  default voice set to {} (speed={})",
+        updated.voice.active, updated.voice.speed
+    );
+
+    ensure_voicevox_running(&voicevox_url).await?;
+
     eprintln!("setup complete!");
 
     Ok(SetupResult {
         db_path:            db.path().display().to_string(),
         voicevox_installed: is_voicevox_installed(),
+        voicevox_running:   is_voicevox_api_ready(&voicevox_url).await,
     })
+}
+
+fn apply_default_voice_preset(cfg: &mut AppConfig, rvc_model_name: &str) {
+    cfg.voice.active = format!("kokoro:{DEFAULT_SETUP_KOKORO_VOICE}");
+    cfg.voice.speed = DEFAULT_SETUP_VOICE_SPEED;
+    cfg.rvc.model = rvc_model_name.to_string();
+}
+
+fn voicevox_version_url(base_url: &str) -> String {
+    format!("{}/version", base_url.trim_end_matches('/'))
+}
+
+async fn is_voicevox_api_ready(base_url: &str) -> bool {
+    crate::http::client()
+        .get(voicevox_version_url(base_url))
+        .timeout(Duration::from_secs(2))
+        .send()
+        .await
+        .is_ok_and(|resp| resp.status().is_success())
+}
+
+fn parse_voicevox_bind_addr(base_url: &str) -> Result<(String, u16)> {
+    let url = reqwest::Url::parse(base_url).map_err(|e| {
+        error::VoicevoxSnafu {
+            message: format!("invalid VOICEVOX URL `{base_url}`: {e}"),
+        }
+        .build()
+    })?;
+
+    let host = url.host_str().ok_or_else(|| {
+        error::VoicevoxSnafu {
+            message: format!("VOICEVOX URL `{base_url}` does not include a host"),
+        }
+        .build()
+    })?;
+
+    let port = url.port_or_known_default().ok_or_else(|| {
+        error::VoicevoxSnafu {
+            message: format!("VOICEVOX URL `{base_url}` does not include a valid port"),
+        }
+        .build()
+    })?;
+
+    Ok((host.to_string(), port))
+}
+
+fn start_voicevox_engine(base_url: &str) -> Result<()> {
+    let executable = crate::paths::voicevox_executable();
+    if !executable.exists() {
+        return error::VoicevoxNotInstalledSnafu.fail();
+    }
+
+    let (host, port) = parse_voicevox_bind_addr(base_url)?;
+    let voicevox_dir = crate::paths::voicevox_dir();
+    let log_path = voicevox_dir.join("engine.log");
+
+    std::fs::create_dir_all(&voicevox_dir).context(error::IoSnafu)?;
+    let stdout_log = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&log_path)
+        .context(error::IoSnafu)?;
+    let stderr_log = stdout_log.try_clone().context(error::IoSnafu)?;
+
+    Command::new(&executable)
+        .arg("--host")
+        .arg(&host)
+        .arg("--port")
+        .arg(port.to_string())
+        .stdout(Stdio::from(stdout_log))
+        .stderr(Stdio::from(stderr_log))
+        .spawn()
+        .context(error::IoSnafu)?;
+
+    eprintln!(
+        "  started voicevox engine on {host}:{port} (logs: {})",
+        log_path.display()
+    );
+
+    Ok(())
+}
+
+async fn wait_for_voicevox_ready(base_url: &str, timeout: Duration) -> Result<()> {
+    let deadline = std::time::Instant::now() + timeout;
+    while std::time::Instant::now() < deadline {
+        if is_voicevox_api_ready(base_url).await {
+            return Ok(());
+        }
+        tokio::time::sleep(Duration::from_millis(500)).await;
+    }
+
+    error::VoicevoxNotRunningSnafu {
+        url: base_url.to_string(),
+    }
+    .fail()
+}
+
+async fn ensure_voicevox_running(base_url: &str) -> Result<()> {
+    if is_voicevox_api_ready(base_url).await {
+        eprintln!("  voicevox api already running at {base_url}");
+        return Ok(());
+    }
+
+    eprintln!("  voicevox api not reachable, starting engine...");
+    start_voicevox_engine(base_url)?;
+    wait_for_voicevox_ready(base_url, Duration::from_secs(30)).await?;
+    eprintln!("  voicevox api ready at {base_url}");
+    Ok(())
 }
 
 async fn download_voicevox(version: &str) -> Result<()> {
@@ -325,5 +465,51 @@ mod tests {
         // VOICEVOX sidecar contains only the filename, no hash
         let content = "voicevox_engine-macos-arm64-0.22.2.vvpp\n";
         assert_eq!(parse_checksum_sidecar(content), None);
+    }
+
+    #[test]
+    fn parse_voicevox_bind_addr_with_explicit_port() {
+        let (host, port) = parse_voicevox_bind_addr("http://127.0.0.1:50021").unwrap();
+        assert_eq!(host, "127.0.0.1");
+        assert_eq!(port, 50021);
+    }
+
+    #[test]
+    fn parse_voicevox_bind_addr_with_default_http_port() {
+        let (host, port) = parse_voicevox_bind_addr("http://localhost").unwrap();
+        assert_eq!(host, "localhost");
+        assert_eq!(port, 80);
+    }
+
+    #[test]
+    fn parse_voicevox_bind_addr_rejects_invalid_url() {
+        let err = parse_voicevox_bind_addr("localhost:50021").unwrap_err();
+        let msg = err.to_string();
+        assert!(
+            msg.contains("invalid VOICEVOX URL") || msg.contains("does not include a host"),
+            "unexpected error message: {msg}"
+        );
+    }
+
+    #[test]
+    fn apply_default_voice_preset_sets_hanazawa_voice_and_slower_speed() {
+        let mut cfg = AppConfig::default();
+        apply_default_voice_preset(
+            &mut cfg,
+            "by swapno Nakano Ichika (CV Hanazawa Kana ) From - The Quintessential Quintuplets \
+             300 Epochs (RVC v2).zip",
+        );
+
+        assert_eq!(cfg.voice.active, "kokoro:jf_alpha");
+        assert_eq!(
+            cfg.rvc.model,
+            "by swapno Nakano Ichika (CV Hanazawa Kana ) From - The Quintessential Quintuplets \
+             300 Epochs (RVC v2).zip"
+        );
+        assert!(
+            (cfg.voice.speed - 0.90).abs() < f64::EPSILON,
+            "expected setup default speed to be slower (0.90), got {}",
+            cfg.voice.speed
+        );
     }
 }

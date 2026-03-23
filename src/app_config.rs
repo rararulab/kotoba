@@ -24,6 +24,8 @@ pub struct AppConfig {
 pub struct VoiceConfig {
     /// Active voice identifier (e.g. "voicevox:1", "vits:model-name")
     pub active: String,
+    /// Default speech speed multiplier for TTS backends.
+    pub speed:  f64,
 }
 
 /// VOICEVOX-specific configuration.
@@ -39,17 +41,27 @@ pub struct VoicevoxConfig {
 }
 
 /// RVC voice conversion configuration.
-#[derive(Debug, Default, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
 pub struct RvcConfig {
+    /// RVC model name (directory under `~/.kotoba/models/rvc/`).
+    /// When non-empty, RVC voice conversion is applied after TTS synthesis.
+    pub model:           String,
     /// Path to Python executable with RVC dependencies installed.
-    pub python: String,
+    pub python:          String,
+    /// Pitch shift in semitones for RVC conversion.
+    pub pitch:           i32,
+    /// Pitch extraction algorithm used by RVC (e.g. rmvpe, rmvpe+, pm).
+    pub pitch_algo:      String,
+    /// Influence of the index file on timbre (0.0 to 1.0).
+    pub index_influence: f64,
 }
 
 impl Default for VoiceConfig {
     fn default() -> Self {
         Self {
             active: "voicevox:1".to_string(),
+            speed:  1.0,
         }
     }
 }
@@ -60,6 +72,18 @@ impl Default for VoicevoxConfig {
             version: "0.22.2".to_string(),
             url:     "http://localhost:50021".to_string(),
             speaker: "1".to_string(),
+        }
+    }
+}
+
+impl Default for RvcConfig {
+    fn default() -> Self {
+        Self {
+            model:           String::new(),
+            python:          String::new(),
+            pitch:           0,
+            pitch_algo:      "rmvpe".to_string(),
+            index_influence: 0.66,
         }
     }
 }

@@ -29,6 +29,4 @@ impl TtsBackend for VitsBackend {
                 .build()
             })
     }
-
-    fn name(&self) -> &'static str { "vits" }
 }

@@ -11,8 +11,9 @@ use crate::error::{self, Result};
 
 /// Inline Python script for RVC inference.
 ///
-/// Arguments: `<model.pth> <index_path_or_empty> <input.wav> <output.wav>
-/// [pitch]`
+/// Arguments:
+/// `<model.pth> <index_path_or_empty> <input.wav> <output.wav> [pitch]
+/// [pitch_algo] [index_influence]`
 const CONVERT_PY: &str = r"
 import torch, io, sys
 _orig = torch.load
@@ -27,12 +28,14 @@ index_path = sys.argv[2]
 input_path = sys.argv[3]
 output_path = sys.argv[4]
 pitch = int(sys.argv[5]) if len(sys.argv) > 5 else 0
+pitch_algo = sys.argv[6] if len(sys.argv) > 6 else 'rmvpe'
+index_influence = float(sys.argv[7]) if len(sys.argv) > 7 else 0.66
 
 c = BaseLoader(only_cpu=True)
 c.apply_conf(
-    tag='m', file_model=model_pth, pitch_algo='pm', pitch_lvl=pitch,
+    tag='m', file_model=model_pth, pitch_algo=pitch_algo, pitch_lvl=pitch,
     file_index=index_path if index_path else '',
-    index_influence=0.75 if index_path else 0.0,
+    index_influence=index_influence if index_path else 0.0,
 )
 r = c.generate_from_cache(audio_data=input_path, tag='m')
 buf = io.BytesIO()
@@ -87,12 +90,19 @@ fn find_file_by_ext(dir: &Path, ext: &str) -> Option<std::path::PathBuf> {
         .find(|p| p.extension().is_some_and(|e| e.eq_ignore_ascii_case(ext)))
 }
 
-/// Convert audio at `input_path` using the given RVC model,
-/// writing the result to `output_path`.
+/// Convert audio at `input_path` using the given RVC model and pitch shift
+/// (in semitones), writing the result to `output_path`.
 ///
 /// Spawns a `python3 -c` subprocess that loads the model and
 /// runs inference via `infer-rvc-python`.
-pub async fn convert(input_path: &Path, model: &str, output_path: &Path) -> Result<()> {
+pub async fn convert(
+    input_path: &Path,
+    model: &str,
+    pitch: i32,
+    pitch_algo: &str,
+    index_influence: f32,
+    output_path: &Path,
+) -> Result<()> {
     validate_model_name(model)?;
 
     let model_dir = crate::paths::models_dir().join("rvc").join(model);
@@ -115,7 +125,9 @@ pub async fn convert(input_path: &Path, model: &str, output_path: &Path) -> Resu
         .arg(&index_path)
         .arg(input_path.display().to_string())
         .arg(output_path.display().to_string())
-        .arg("0")
+        .arg(pitch.to_string())
+        .arg(pitch_algo)
+        .arg(index_influence.clamp(0.0, 1.0).to_string())
         .env("OMP_NUM_THREADS", "1")
         .env("MKL_NUM_THREADS", "1")
         .output()

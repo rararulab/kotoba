@@ -4,6 +4,7 @@
 //! romanization, including contextual ん handling (apostrophe before
 //! vowels and y-row) and proper sokuon doubling.
 
+use serde_json::Value;
 use wana_kana::ConvertJapanese;
 
 /// Convert a kana string to its romaji representation.
@@ -12,8 +13,78 @@ use wana_kana::ConvertJapanese;
 /// characters (kanji, ASCII, punctuation) pass through unchanged.
 pub fn to_romaji(kana: &str) -> String { kana.to_romaji() }
 
+/// Convert Japanese text to natural sentence-level romaji.
+///
+/// For mixed kanji/kana input, this tries Google's romanization output first
+/// (which includes word boundaries and long-vowel marks), then falls back to
+/// local kana-only conversion on failure.
+pub async fn to_romaji_natural(text: &str) -> String {
+    let trimmed = text.trim();
+    if trimmed.is_empty() {
+        return String::new();
+    }
+
+    let fallback = to_romaji(trimmed);
+    if !contains_japanese(trimmed) {
+        return fallback;
+    }
+
+    google_romanization(trimmed)
+        .await
+        .filter(|s| !s.trim().is_empty())
+        .unwrap_or(fallback)
+}
+
+async fn google_romanization(text: &str) -> Option<String> {
+    let response: Value = crate::http::client()
+        .get("https://translate.googleapis.com/translate_a/single")
+        .query(&[
+            ("client", "gtx"),
+            ("sl", "ja"),
+            ("tl", "en"),
+            ("dt", "t"),
+            ("dt", "rm"),
+            ("q", text),
+        ])
+        .send()
+        .await
+        .ok()?
+        .json()
+        .await
+        .ok()?;
+
+    parse_google_romanization(&response)
+}
+
+fn parse_google_romanization(value: &Value) -> Option<String> {
+    let segments = value.get(0)?.as_array()?;
+    for part in segments.iter().rev() {
+        let candidate = part.get(3).and_then(Value::as_str)?;
+        if !candidate.trim().is_empty() {
+            return Some(candidate.trim().to_string());
+        }
+    }
+    None
+}
+
+fn contains_japanese(text: &str) -> bool { text.chars().any(is_japanese_char) }
+
+const fn is_japanese_char(ch: char) -> bool {
+    matches!(
+        ch,
+        '\u{3040}'..='\u{30FF}'
+            | '\u{31F0}'..='\u{31FF}'
+            | '\u{3400}'..='\u{4DBF}'
+            | '\u{4E00}'..='\u{9FFF}'
+            | '\u{F900}'..='\u{FAFF}'
+            | '\u{3005}'
+    )
+}
+
 #[cfg(test)]
 mod tests {
+    use serde_json::json;
+
     use super::*;
 
     #[test]
@@ -133,5 +204,52 @@ mod tests {
     #[test]
     fn katakana_handakuten() {
         assert_eq!(to_romaji("パピプペポ"), "papipupepo");
+    }
+
+    #[test]
+    fn parses_google_romanization_from_response() {
+        let payload = json!([
+            [
+                [
+                    "I'm really happy today! ",
+                    "今日は本当に嬉しい！",
+                    null,
+                    null
+                ],
+                [
+                    "But I'm a little nervous.",
+                    "でも少し緊張してる。",
+                    null,
+                    null
+                ],
+                [
+                    null,
+                    null,
+                    null,
+                    "Kyō wa hontōni ureshī! Demo sukoshi kinchō shi teru."
+                ]
+            ],
+            null,
+            "ja"
+        ]);
+
+        let parsed = parse_google_romanization(&payload).expect("romanization should be parsed");
+        assert_eq!(
+            parsed,
+            "Kyō wa hontōni ureshī! Demo sukoshi kinchō shi teru."
+        );
+    }
+
+    #[test]
+    fn google_romanization_missing_returns_none() {
+        let payload = json!([[["x", "y", null, null]], null, "ja"]);
+        assert!(parse_google_romanization(&payload).is_none());
+    }
+
+    #[test]
+    fn detects_japanese_text() {
+        assert!(contains_japanese("今日はいい天気"));
+        assert!(contains_japanese("カタカナ"));
+        assert!(!contains_japanese("hello world"));
     }
 }

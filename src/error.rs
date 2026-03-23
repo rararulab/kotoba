@@ -72,6 +72,12 @@ pub enum KotobaError {
         "auto-fill failed for word '{word}': {message} — pass reading and meaning manually"
     ))]
     WordLookup { word: String, message: String },
+
+    #[snafu(display("generated audio is invalid at {path}: {message}"))]
+    AudioInvalid { path: String, message: String },
+
+    #[snafu(display("audio playback failed for {path}: {message}"))]
+    AudioPlayback { path: String, message: String },
 }
 
 pub type Result<T> = std::result::Result<T, KotobaError>;
