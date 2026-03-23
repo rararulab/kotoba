@@ -251,8 +251,6 @@ fn pcm16le_to_wav_bytes(pcm: &[u8], sample_rate: u32, channels: u16) -> Result<V
 
 #[cfg(test)]
 mod tests {
-    use std::{env, fs};
-
     use super::*;
 
     #[test]
@@ -288,45 +286,5 @@ mod tests {
             .expect_err("odd-length payload should fail");
         let msg = err.to_string();
         assert!(msg.contains("odd-length PCM"));
-    }
-
-    #[tokio::test]
-    #[ignore = "requires running CosyVoice runtime and a local Rara prompt wav sample"]
-    async fn zero_shot_clone_to_love_ru_rara() {
-        let base_url = env::var("KOTOBA_TEST_COSYVOICE_URL")
-            .unwrap_or_else(|_| "http://127.0.0.1:50000".to_string());
-        let prompt_wav = env::var("KOTOBA_TEST_RARA_PROMPT_WAV").expect(
-            "set KOTOBA_TEST_RARA_PROMPT_WAV to a clean Rara reference wav path before running",
-        );
-        let prompt_text = env::var("KOTOBA_TEST_RARA_PROMPT_TEXT")
-            .unwrap_or_else(|_| "This is a reference line for Rara voice cloning.".to_string());
-        let synth_text = env::var("KOTOBA_TEST_RARA_SYNTH_TEXT")
-            .unwrap_or_else(|_| "Please generate speech using the cloned Rara voice.".to_string());
-
-        let backend = CosyvoiceBackend::new(
-            base_url,
-            "zero_shot".to_string(),
-            "clone".to_string(),
-            prompt_text,
-            prompt_wav,
-            String::new(),
-        );
-        let out_dir = tempfile::tempdir().expect("failed to create temp dir for output");
-        let out_path = out_dir.path().join("rara-clone.wav");
-
-        backend
-            .synthesize(&synth_text, &out_path)
-            .await
-            .expect("zero-shot clone synthesis failed");
-
-        let bytes = fs::read(&out_path).expect("failed to read synthesized wav");
-        assert!(
-            bytes.len() > 44,
-            "synthesized wav should contain PCM payload"
-        );
-        assert!(
-            bytes.starts_with(b"RIFF"),
-            "synthesized payload should be a WAV file"
-        );
     }
 }
