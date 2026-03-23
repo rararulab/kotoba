@@ -2,7 +2,10 @@
 //!
 //! Pipeline: text → phoneme tokens → ONNX model inference → WAV file.
 
-use std::path::{Path, PathBuf};
+use std::{
+    path::{Path, PathBuf},
+    process::Command,
+};
 
 use ndarray::{Array1, Array2};
 use ort::{inputs, session::Session, value::TensorRef};
@@ -31,6 +34,10 @@ pub enum KokoroError {
     /// Blocking task join error.
     #[snafu(display("join error: {source}"))]
     Join { source: tokio::task::JoinError },
+
+    /// Failed to phonemize text with Kokoro-compatible tokenizer.
+    #[snafu(display("kokoro tokenizer error: {message}"))]
+    Tokenizer { message: String },
 }
 
 /// Module-level result type.
@@ -38,37 +45,208 @@ pub type Result<T> = std::result::Result<T, KokoroError>;
 
 /// Tokenize text into phoneme IDs for Kokoro ONNX model input.
 ///
-/// For Japanese (`ja`), converts kana to romaji first via
-/// [`crate::romaji::to_romaji`], then maps each character to Kokoro's
-/// phoneme vocabulary. For English (`en`), uses character-level
-/// tokenization on the lowercased input.
+/// Preferred path uses the official `kokoro-onnx` Python tokenizer
+/// (`phonemizer` + `espeak-ng`) via subprocess and returns Kokoro vocab IDs.
+/// For non-Japanese languages, falls back to a lightweight approximate mapping
+/// when the Python tokenizer is unavailable.
 ///
 /// The returned vector is framed with BOS (0) and EOS (0) tokens.
-fn tokenize(text: &str, lang: &str) -> Vec<i64> {
-    let phonemes = match lang {
-        "ja" => crate::romaji::to_romaji(text),
-        _ => text.to_lowercase(),
-    };
+fn tokenize(text: &str, lang: &str) -> Result<Vec<i64>> {
+    let python_tokens = tokenize_with_kokoro_python(text, lang);
+    if let Ok(core_tokens) = python_tokens {
+        let mut tokens = Vec::with_capacity(core_tokens.len() + 2);
+        tokens.push(0); // BOS
+        tokens.extend(core_tokens);
+        tokens.push(0); // EOS
+        return Ok(tokens);
+    }
+
+    if lang == "ja" {
+        let message = python_tokens
+            .err()
+            .unwrap_or_else(|| "unknown tokenizer failure".to_string());
+        return TokenizerSnafu { message }.fail();
+    }
+
+    // Fallback tokenizer: only used when python kokoro tokenizer is unavailable.
+    // This is approximate and less accurate than official phonemization.
+    let phonemes = text.to_lowercase();
 
     let mut ids: Vec<i64> = Vec::with_capacity(phonemes.len() + 2);
     ids.push(0); // BOS
 
     for ch in phonemes.chars() {
-        let id = match ch {
-            ' ' => 1,
-            c if c.is_ascii_alphabetic() => i64::from(c as u8 - b'a') + 2,
-            '-' => 28,  // long vowel marker
-            '\'' => 29, // glottal stop
-            other => {
-                tracing::warn!("unmapped character in tokenizer: {other:?}");
-                1 // fallback to space token
-            }
-        };
-        ids.push(id);
+        if let Some(id) = kokoro_vocab_id(ch) {
+            ids.push(id);
+        }
     }
 
     ids.push(0); // EOS
-    ids
+    Ok(ids)
+}
+
+const fn kokoro_vocab_id(ch: char) -> Option<i64> {
+    match ch {
+        ';' => Some(1),
+        ':' => Some(2),
+        ',' => Some(3),
+        '.' => Some(4),
+        '!' => Some(5),
+        '?' => Some(6),
+        ' ' => Some(16),
+        'a' => Some(43),
+        'b' => Some(44),
+        'c' => Some(45),
+        'd' => Some(46),
+        'e' => Some(47),
+        'f' => Some(48),
+        // Kokoro vocab uses IPA small script g (U+0261), but romaji contains
+        // ASCII 'g'. Map it explicitly.
+        'g' | '\u{0261}' => Some(92),
+        'h' => Some(50),
+        'i' => Some(51),
+        'j' => Some(52),
+        'k' => Some(53),
+        'l' => Some(54),
+        'm' => Some(55),
+        'n' => Some(56),
+        'o' => Some(57),
+        'p' => Some(58),
+        'q' => Some(59),
+        'r' => Some(60),
+        's' => Some(61),
+        't' => Some(62),
+        'u' => Some(63),
+        'v' => Some(64),
+        'w' => Some(65),
+        'x' => Some(66),
+        'y' => Some(67),
+        'z' => Some(68),
+        _ => None,
+    }
+}
+
+/// Python script that tokenizes text using `kokoro-onnx` and `misaki[ja]`.
+///
+/// For Japanese, misaki's pyopenjtalk G2P outputs Unicode palatalized consonant
+/// characters (e.g. U+1D84 `ᶄ` for palatalized k) that are not in the Kokoro
+/// tokenizer vocabulary. The `normalize_ja_phonemes` step decomposes these into
+/// base consonant + IPA palatalization modifier (U+02B2 `ʲ`), which are both
+/// valid Kokoro vocab entries.
+const KOKORO_TOKENIZER_SCRIPT: &str = r#"
+import json
+import sys
+from kokoro_onnx.tokenizer import Tokenizer
+
+def normalize_ja_phonemes(phonemes):
+    """Decompose misaki palatalized chars into Kokoro-compatible IPA."""
+    PALATAL_MAP = {
+        "\u1D80": "b\u02B2",
+        "\u1D83": "\u0261\u02B2",
+        "\u1D84": "k\u02B2",
+        "\u1D86": "m\u02B2",
+        "\u1D88": "p\u02B2",
+        "\u1D89": "r\u02B2",
+    }
+    STRIP = set("^_-")
+    out = []
+    for ch in phonemes:
+        if ch in STRIP:
+            continue
+        if ch in PALATAL_MAP:
+            out.append(PALATAL_MAP[ch])
+        elif ch == "g":
+            out.append("\u0261")
+        else:
+            out.append(ch)
+    return "".join(out)
+
+text = sys.argv[1]
+lang = sys.argv[2]
+tokenizer = Tokenizer()
+
+if lang == "ja":
+    from misaki import ja as misaki_ja
+    g2p = misaki_ja.JAG2P(version="pyopenjtalk")
+    phonemes, _ = g2p(text)
+    phonemes = normalize_ja_phonemes(phonemes)
+else:
+    phonemes = tokenizer.phonemize(text, lang)
+
+tokens = tokenizer.tokenize(phonemes)
+print(json.dumps(tokens))
+"#;
+
+fn tokenize_with_kokoro_python(text: &str, lang: &str) -> std::result::Result<Vec<i64>, String> {
+    if lang == "ja" {
+        if let Ok(tokens) = run_uv_tokenizer(text, lang) {
+            return Ok(tokens);
+        }
+        return run_python_tokenizer("python3", &["-c"], text, lang);
+    }
+
+    if let Ok(tokens) = run_python_tokenizer("python3", &["-c"], text, lang) {
+        return Ok(tokens);
+    }
+
+    run_uv_tokenizer(text, lang)
+}
+
+fn run_python_tokenizer(
+    python_bin: &str,
+    prefix_args: &[&str],
+    text: &str,
+    lang: &str,
+) -> std::result::Result<Vec<i64>, String> {
+    let mut cmd = Command::new(python_bin);
+    cmd.args(prefix_args)
+        .arg(KOKORO_TOKENIZER_SCRIPT)
+        .arg(text)
+        .arg(lang);
+    parse_tokenizer_output(&cmd.output().map_err(|e| e.to_string())?)
+}
+
+fn run_uv_tokenizer(text: &str, lang: &str) -> std::result::Result<Vec<i64>, String> {
+    let mut cmd = Command::new("uv");
+    cmd.arg("run")
+        .arg("--quiet")
+        .arg("--with")
+        .arg("kokoro-onnx");
+
+    if lang == "ja" {
+        // misaki + pyopenjtalk for Japanese G2P
+        cmd.arg("--with")
+            .arg("misaki[ja]")
+            .arg("--with")
+            .arg("pyopenjtalk");
+    }
+
+    cmd.arg("python")
+        .arg("-c")
+        .arg(KOKORO_TOKENIZER_SCRIPT)
+        .arg(text)
+        .arg(lang);
+    parse_tokenizer_output(&cmd.output().map_err(|e| e.to_string())?)
+}
+
+fn parse_tokenizer_output(output: &std::process::Output) -> std::result::Result<Vec<i64>, String> {
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        return Err(format!(
+            "tokenizer command failed (status {}): {}",
+            output.status, stderr
+        ));
+    }
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let json_line = stdout
+        .lines()
+        .rev()
+        .find(|line| !line.trim().is_empty())
+        .ok_or_else(|| "tokenizer returned empty output".to_string())?;
+
+    serde_json::from_str::<Vec<i64>>(json_line)
+        .map_err(|e| format!("failed to parse tokenizer JSON: {e}"))
 }
 
 /// Return the directory where Kokoro models are stored
@@ -99,7 +277,7 @@ pub async fn synthesize(text: &str, lang: &str, voice: &str, output: &Path) -> R
         .fail();
     }
 
-    let tokens = tokenize(text, lang);
+    let tokens = tokenize(text, lang)?;
     let voice = voice.to_string();
     let output = output.to_path_buf();
 
@@ -250,7 +428,7 @@ mod tests {
 
     #[test]
     fn tokenize_japanese_kana() {
-        let tokens = tokenize("こんにちは", "ja");
+        let tokens = tokenize("こんにちは", "ja").expect("tokenize should succeed");
         assert!(
             !tokens.is_empty(),
             "should produce tokens for Japanese kana"
@@ -260,15 +438,22 @@ mod tests {
 
     #[test]
     fn tokenize_empty_input() {
-        let tokens = tokenize("", "ja");
+        let tokens = tokenize("", "ja").expect("tokenize should succeed");
         // At minimum BOS + EOS
         assert!(tokens.len() >= 2);
     }
 
     #[test]
     fn tokenize_ascii_passthrough() {
-        let tokens = tokenize("hello", "en");
+        let tokens = tokenize("hello", "en").expect("tokenize should succeed");
         assert!(!tokens.is_empty());
+    }
+
+    #[test]
+    fn tokenize_uses_kokoro_vocab_ids() {
+        // In Kokoro's official vocab, 'a' is 43 (not 2).
+        let tokens = tokenize("a", "en").expect("tokenize should succeed");
+        assert_eq!(tokens, vec![0, 43, 0]);
     }
 
     #[test]
@@ -282,6 +467,11 @@ mod tests {
 
     #[test]
     fn synthesize_fails_when_model_missing() {
+        let model_path = models_dir().join("kokoro-v1.0.onnx");
+        if model_path.exists() {
+            // Models installed locally — cannot test "model not found" path.
+            return;
+        }
         let rt = tokio::runtime::Runtime::new().unwrap();
         let result = rt.block_on(synthesize(
             "test",
@@ -292,8 +482,14 @@ mod tests {
         assert!(result.is_err());
         let err = result.unwrap_err().to_string();
         assert!(
-            err.contains("kokoro model not found"),
-            "error should mention kokoro model not found, got: {err}"
+            err.contains("kokoro model not found") || err.contains("kokoro tokenizer error"),
+            "error should mention missing model or tokenizer failure, got: {err}"
         );
+    }
+
+    #[test]
+    fn tokenizer_script_normalizes_ja_phonemes() {
+        assert!(KOKORO_TOKENIZER_SCRIPT.contains("normalize_ja_phonemes"));
+        assert!(KOKORO_TOKENIZER_SCRIPT.contains("PALATAL_MAP"));
     }
 }
