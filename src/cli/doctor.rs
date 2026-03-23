@@ -76,6 +76,7 @@ pub async fn run(db: &Database, json: bool) -> Result<()> {
     checks.push(check_database(db).await);
     checks.push(check_voicevox_installed());
     checks.push(check_voicevox_api().await);
+    checks.push(check_cosyvoice_api().await);
     checks.push(check_audio_cache());
     checks.push(check_kokoro_model());
     checks.push(check_rvc_python());
@@ -188,6 +189,37 @@ async fn check_voicevox_api() -> Check {
             detail: format!("{base_url} unreachable — start VOICEVOX Engine first"),
         },
     }
+}
+
+async fn check_cosyvoice_api() -> Check {
+    let cfg = crate::app_config::load();
+    let base_url = std::env::var("COSYVOICE_URL").unwrap_or_else(|_| cfg.cosyvoice.url.clone());
+
+    let client = crate::http::client();
+    client
+        .get(base_url.trim_end_matches('/'))
+        .timeout(std::time::Duration::from_secs(3))
+        .send()
+        .await
+        .map_or_else(
+            |_| {
+                let auto = if cfg.cosyvoice.autostart {
+                    "autostart enabled"
+                } else {
+                    "autostart disabled"
+                };
+                Check {
+                    name:   "cosyvoice_api".into(),
+                    status: Status::NotRunning,
+                    detail: format!("{base_url} unreachable ({auto})"),
+                }
+            },
+            |resp| Check {
+                name:   "cosyvoice_api".into(),
+                status: Status::Ok,
+                detail: format!("HTTP {}, url={base_url}", resp.status()),
+            },
+        )
 }
 
 fn check_audio_cache() -> Check {

@@ -3,6 +3,8 @@
 use std::{
     fmt::Write as _,
     path::{Path, PathBuf},
+    process::{Command, Stdio},
+    time::Duration,
 };
 
 use rodio::{Decoder, DeviceSinkBuilder, Player, Source};
@@ -52,6 +54,10 @@ struct StyleProfile {
     pause_scale:           f32,
     jitter_strength:       f32,
 }
+
+const COSYVOICE_HOST_TOKEN: &str = "{host}";
+const COSYVOICE_PORT_TOKEN: &str = "{port}";
+const COSYVOICE_URL_TOKEN: &str = "{url}";
 
 /// Parse a `backend:id` voice config string (e.g. `voicevox:3`,
 /// `vits:model-name`).
@@ -130,7 +136,11 @@ pub async fn play_word(word: &str, enable: bool, style: PlayStyle) -> Result<Pat
     } else {
         String::new()
     };
-    let cosyvoice_cfg = cfg.cosyvoice.clone();
+    let mut cosyvoice_cfg = cfg.cosyvoice.clone();
+    if config.backend == "cosyvoice" {
+        cosyvoice_cfg.url = cosyvoice_base_url(&cosyvoice_cfg);
+        ensure_cosyvoice_running(&cosyvoice_cfg).await?;
+    }
     let rvc_model_cfg = cfg.rvc.model.trim().to_string();
     let rvc_model = if rvc_model_cfg.is_empty() {
         None
@@ -966,6 +976,153 @@ fn write_pcm16_wav(path: &Path, samples: &[f32], sample_rate: u32, channels: u16
     Ok(())
 }
 
+fn cosyvoice_base_url(cfg: &crate::app_config::CosyvoiceConfig) -> String {
+    std::env::var("COSYVOICE_URL").unwrap_or_else(|_| cfg.url.clone())
+}
+
+async fn is_cosyvoice_api_ready(base_url: &str) -> bool {
+    let url = base_url.trim_end_matches('/');
+    if url.is_empty() {
+        return false;
+    }
+
+    crate::http::client()
+        .get(url)
+        .timeout(Duration::from_secs(2))
+        .send()
+        .await
+        .is_ok()
+}
+
+fn parse_cosyvoice_bind_addr(base_url: &str) -> Result<(String, u16)> {
+    let url = reqwest::Url::parse(base_url).map_err(|source| {
+        error::CosyvoiceSnafu {
+            message: format!("invalid cosyvoice.url `{base_url}`: {source}"),
+        }
+        .build()
+    })?;
+
+    let host = url.host_str().ok_or_else(|| {
+        error::CosyvoiceSnafu {
+            message: format!("cosyvoice.url `{base_url}` does not include a host"),
+        }
+        .build()
+    })?;
+    let port = url.port_or_known_default().ok_or_else(|| {
+        error::CosyvoiceSnafu {
+            message: format!("cosyvoice.url `{base_url}` does not include a valid port"),
+        }
+        .build()
+    })?;
+    Ok((host.to_string(), port))
+}
+
+fn resolve_cosyvoice_command(cfg: &crate::app_config::CosyvoiceConfig) -> String {
+    std::env::var("COSYVOICE_CMD").unwrap_or_else(|_| cfg.command.clone())
+}
+
+fn expand_cosyvoice_command(template: &str, host: &str, port: u16, url: &str) -> String {
+    template
+        .replace(COSYVOICE_HOST_TOKEN, host)
+        .replace(COSYVOICE_PORT_TOKEN, &port.to_string())
+        .replace(COSYVOICE_URL_TOKEN, url)
+}
+
+fn start_cosyvoice_runtime(base_url: &str, command_template: &str) -> Result<()> {
+    let (host, port) = parse_cosyvoice_bind_addr(base_url)?;
+    let command_line = expand_cosyvoice_command(command_template, &host, port, base_url);
+    let log_path = crate::paths::cosyvoice_log_file();
+
+    if let Some(parent) = log_path.parent() {
+        std::fs::create_dir_all(parent).context(error::IoSnafu)?;
+    }
+    let stdout_log = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&log_path)
+        .context(error::IoSnafu)?;
+    let stderr_log = stdout_log.try_clone().context(error::IoSnafu)?;
+
+    #[cfg(target_os = "windows")]
+    let mut command = {
+        let mut c = Command::new("cmd");
+        c.arg("/C").arg(&command_line);
+        c
+    };
+    #[cfg(not(target_os = "windows"))]
+    let mut command = {
+        let mut c = Command::new("sh");
+        c.arg("-lc").arg(&command_line);
+        c
+    };
+
+    command
+        .stdout(Stdio::from(stdout_log))
+        .stderr(Stdio::from(stderr_log))
+        .spawn()
+        .context(error::IoSnafu)?;
+
+    eprintln!(
+        "  started cosyvoice runtime on {host}:{port} (logs: {})",
+        log_path.display()
+    );
+    Ok(())
+}
+
+async fn wait_for_cosyvoice_ready(base_url: &str, timeout: Duration) -> Result<()> {
+    let deadline = std::time::Instant::now() + timeout;
+    while std::time::Instant::now() < deadline {
+        if is_cosyvoice_api_ready(base_url).await {
+            return Ok(());
+        }
+        tokio::time::sleep(Duration::from_millis(500)).await;
+    }
+    error::CosyvoiceSnafu {
+        message: format!("CosyVoice runtime did not become ready at {base_url} in time"),
+    }
+    .fail()
+}
+
+async fn ensure_cosyvoice_running(cfg: &crate::app_config::CosyvoiceConfig) -> Result<()> {
+    let base_url = cfg.url.trim().to_string();
+    if base_url.is_empty() {
+        return error::CosyvoiceSnafu {
+            message: "cosyvoice.url is empty".to_string(),
+        }
+        .fail();
+    }
+    if is_cosyvoice_api_ready(&base_url).await {
+        return Ok(());
+    }
+    if !cfg.autostart {
+        return error::CosyvoiceSnafu {
+            message: format!(
+                "CosyVoice runtime not reachable at {base_url} and cosyvoice.autostart=false"
+            ),
+        }
+        .fail();
+    }
+
+    let command = resolve_cosyvoice_command(cfg);
+    if command.trim().is_empty() {
+        return error::CosyvoiceSnafu {
+            message: format!(
+                "CosyVoice runtime not reachable at {base_url}. Configure cosyvoice.command (or \
+                 COSYVOICE_CMD) to let kotoba auto-start it, e.g. `python3 \
+                 /path/to/CosyVoice/runtime/python/fastapi/server.py --port {{port}} --model_dir \
+                 iic/CosyVoice2-0.5B`"
+            ),
+        }
+        .fail();
+    }
+
+    eprintln!("  cosyvoice runtime not reachable, starting...");
+    start_cosyvoice_runtime(&base_url, command.trim())?;
+    wait_for_cosyvoice_ready(&base_url, Duration::from_secs(90)).await?;
+    eprintln!("  cosyvoice runtime ready at {base_url}");
+    Ok(())
+}
+
 /// Resolve the VOICEVOX base URL: env var overrides config.
 fn voicevox_base_url() -> String {
     std::env::var("VOICEVOX_URL").unwrap_or_else(|_| crate::app_config::load().voicevox.url.clone())
@@ -991,6 +1148,27 @@ mod tests {
     use std::{fs::File, io::Write};
 
     use super::*;
+
+    #[test]
+    fn parse_cosyvoice_bind_addr_with_explicit_port() {
+        let (host, port) = parse_cosyvoice_bind_addr("http://127.0.0.1:50000").unwrap();
+        assert_eq!(host, "127.0.0.1");
+        assert_eq!(port, 50000);
+    }
+
+    #[test]
+    fn expand_cosyvoice_command_supports_placeholders() {
+        let cmd = expand_cosyvoice_command(
+            "python server.py --host {host} --port {port} --url {url}",
+            "127.0.0.1",
+            50000,
+            "http://127.0.0.1:50000",
+        );
+        assert_eq!(
+            cmd,
+            "python server.py --host 127.0.0.1 --port 50000 --url http://127.0.0.1:50000"
+        );
+    }
 
     #[test]
     fn parse_voice_config_with_colon() {

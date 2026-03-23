@@ -179,21 +179,25 @@ kotoba voice rvc off
 
 ### 5.6 CosyVoice（免训练克隆路线）
 
-如果你不想训练 RVC，可以直接接 CosyVoice runtime：
+如果你不想训练 RVC，可以直接接 CosyVoice runtime，并让 `kotoba` 自动拉起服务（不用每次手动起进程）：
 
 ```bash
 # 1) 指向 CosyVoice 服务地址（默认 127.0.0.1:50000）
 kotoba config set cosyvoice.url http://127.0.0.1:50000
 
-# 2) 先用 sft 模式（最简单）
-kotoba config set cosyvoice.mode sft
+# 2) 允许自动拉起（默认就是 true）
+kotoba config set cosyvoice.autostart true
 
-# 3) 选择 CosyVoice speaker/profile
+# 3) 配置启动命令（只需一次，支持 {port}/{host}/{url} 占位符）
+kotoba config set cosyvoice.command "python3 /path/to/CosyVoice/runtime/python/fastapi/server.py --port {port} --model_dir iic/CosyVoice2-0.5B"
+
+# 4) 用 sft 模式最简单
+kotoba config set cosyvoice.mode sft
 kotoba voice set cosyvoice:中文女
 kotoba play こんにちは --enable
 ```
 
-零样本克隆常用配置（需 CosyVoice 侧已启用对应接口）：
+零样本克隆常用配置：
 
 ```bash
 kotoba config set cosyvoice.mode zero_shot

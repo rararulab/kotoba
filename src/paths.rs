@@ -31,6 +31,12 @@ pub fn voicevox_executable() -> PathBuf { voicevox_dir().join("run") }
 /// Voice models directory: `<data>/models`
 pub fn models_dir() -> PathBuf { data_dir().join("models") }
 
+/// `CosyVoice` runtime directory: `<data>/cosyvoice`
+pub fn cosyvoice_dir() -> PathBuf { data_dir().join("cosyvoice") }
+
+/// `CosyVoice` runtime log file: `<data>/cosyvoice/runtime.log`
+pub fn cosyvoice_log_file() -> PathBuf { cosyvoice_dir().join("runtime.log") }
+
 /// Audio cache directory: `<data>/audio`
 pub fn audio_cache_dir() -> PathBuf { data_dir().join("audio") }
 

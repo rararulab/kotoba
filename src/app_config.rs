@@ -48,6 +48,12 @@ pub struct VoicevoxConfig {
 pub struct CosyvoiceConfig {
     /// API base URL.
     pub url:           String,
+    /// Automatically start runtime when URL is unreachable.
+    pub autostart:     bool,
+    /// Command template used to launch runtime.
+    ///
+    /// Supports placeholders: `{host}`, `{port}`, `{url}`.
+    pub command:       String,
     /// Inference mode (`sft`, `zero_shot`, `cross_lingual`, `instruct`).
     pub mode:          String,
     /// Prompt text for `zero_shot` mode.
@@ -98,6 +104,8 @@ impl Default for CosyvoiceConfig {
     fn default() -> Self {
         Self {
             url:           "http://127.0.0.1:50000".to_string(),
+            autostart:     true,
+            command:       String::new(),
             mode:          "sft".to_string(),
             prompt_text:   String::new(),
             prompt_wav:    String::new(),

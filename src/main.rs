@@ -300,6 +300,11 @@ fn set_config_field(cfg: &mut app_config::AppConfig, key: &str, value: &str) {
         "voicevox.url" => cfg.voicevox.url = value.to_string(),
         "voicevox.speaker" => cfg.voicevox.speaker = value.to_string(),
         "cosyvoice.url" => cfg.cosyvoice.url = value.to_string(),
+        "cosyvoice.autostart" => match parse_bool_value(value) {
+            Some(v) => cfg.cosyvoice.autostart = v,
+            None => eprintln!("warning: invalid bool for cosyvoice.autostart: {value}"),
+        },
+        "cosyvoice.command" => cfg.cosyvoice.command = value.to_string(),
         "cosyvoice.mode" => cfg.cosyvoice.mode = value.to_string(),
         "cosyvoice.prompt_text" => cfg.cosyvoice.prompt_text = value.to_string(),
         "cosyvoice.prompt_wav" => cfg.cosyvoice.prompt_wav = value.to_string(),
@@ -328,6 +333,8 @@ fn get_config_field(cfg: &app_config::AppConfig, key: &str) -> Option<String> {
         "voicevox.url" => Some(cfg.voicevox.url.clone()),
         "voicevox.speaker" => Some(cfg.voicevox.speaker.clone()),
         "cosyvoice.url" => Some(cfg.cosyvoice.url.clone()),
+        "cosyvoice.autostart" => Some(cfg.cosyvoice.autostart.to_string()),
+        "cosyvoice.command" => Some(cfg.cosyvoice.command.clone()),
         "cosyvoice.mode" => Some(cfg.cosyvoice.mode.clone()),
         "cosyvoice.prompt_text" => Some(cfg.cosyvoice.prompt_text.clone()),
         "cosyvoice.prompt_wav" => Some(cfg.cosyvoice.prompt_wav.clone()),
@@ -350,6 +357,14 @@ fn config_as_map(cfg: &app_config::AppConfig) -> Vec<(String, String)> {
         ("voicevox.url".to_string(), cfg.voicevox.url.clone()),
         ("voicevox.speaker".to_string(), cfg.voicevox.speaker.clone()),
         ("cosyvoice.url".to_string(), cfg.cosyvoice.url.clone()),
+        (
+            "cosyvoice.autostart".to_string(),
+            cfg.cosyvoice.autostart.to_string(),
+        ),
+        (
+            "cosyvoice.command".to_string(),
+            cfg.cosyvoice.command.clone(),
+        ),
         ("cosyvoice.mode".to_string(), cfg.cosyvoice.mode.clone()),
         (
             "cosyvoice.prompt_text".to_string(),
@@ -372,4 +387,13 @@ fn config_as_map(cfg: &app_config::AppConfig) -> Vec<(String, String)> {
             cfg.rvc.index_influence.to_string(),
         ),
     ]
+}
+
+fn parse_bool_value(value: &str) -> Option<bool> {
+    let normalized = value.trim().to_ascii_lowercase();
+    match normalized.as_str() {
+        "1" | "true" | "yes" | "on" => Some(true),
+        "0" | "false" | "no" | "off" => Some(false),
+        _ => None,
+    }
 }
