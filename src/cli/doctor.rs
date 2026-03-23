@@ -78,7 +78,7 @@ pub async fn run(db: &Database, json: bool) -> Result<()> {
     checks.push(check_voicevox_api().await);
     checks.push(check_audio_cache());
     checks.push(check_kokoro_model());
-    checks.push(check_rvc_sidecar().await);
+    checks.push(check_rvc_python());
     checks.push(check_rvc_models());
     checks.push(check_disk_space());
 
@@ -233,27 +233,27 @@ fn check_kokoro_model() -> Check {
     }
 }
 
-async fn check_rvc_sidecar() -> Check {
-    let url = crate::rvc::base_url();
+fn check_rvc_python() -> Check {
+    let python = crate::rvc::resolve_python();
+    let python_display = python.display().to_string();
 
-    if crate::http::client()
-        .get(format!("{url}/version"))
-        .timeout(std::time::Duration::from_secs(1))
-        .send()
-        .await
-        .is_ok()
+    match std::process::Command::new(&python)
+        .args(["-c", "from infer_rvc_python import BaseLoader"])
+        .output()
     {
-        Check {
-            name:   "rvc_sidecar".into(),
+        Ok(output) if output.status.success() => Check {
+            name:   "rvc_python".into(),
             status: Status::Ok,
-            detail: format!("running at {url}"),
-        }
-    } else {
-        Check {
-            name:   "rvc_sidecar".into(),
+            detail: format!("infer-rvc-python available ({python_display})"),
+        },
+        _ => Check {
+            name:   "rvc_python".into(),
             status: Status::Ok,
-            detail: "not running (optional — starts automatically when needed)".into(),
-        }
+            detail: format!(
+                "infer-rvc-python not installed (optional — needed for RVC voice conversion, \
+                 python={python_display})"
+            ),
+        },
     }
 }
 
