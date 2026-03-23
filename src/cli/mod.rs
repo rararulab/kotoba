@@ -226,6 +226,25 @@ pub enum VoiceAction {
         /// Voice name or ID
         name: String,
     },
+    /// Manage RVC voice conversion models
+    Rvc {
+        #[command(subcommand)]
+        action: VoiceRvcAction,
+    },
+}
+
+/// RVC model management subcommands.
+#[derive(Subcommand)]
+pub enum VoiceRvcAction {
+    /// List downloaded RVC models
+    List,
+    /// Set the active RVC model (supports fuzzy matching)
+    Set {
+        /// Model name or substring (e.g. "miku")
+        name: String,
+    },
+    /// Disable RVC voice conversion
+    Off,
 }
 
 /// HuggingFace model management subcommands.
@@ -274,5 +293,47 @@ mod tests {
 
         assert_eq!(reading.as_deref(), Some("せいこう"));
         assert_eq!(meaning.as_deref(), Some("success"));
+    }
+
+    #[test]
+    fn voice_rvc_list_command_parses() {
+        let cli =
+            Cli::try_parse_from(["kotoba", "voice", "rvc", "list"]).expect("parse should succeed");
+        let Command::Voice { action } = cli.command else {
+            panic!("expected voice command");
+        };
+        let VoiceAction::Rvc { action } = action else {
+            panic!("expected voice rvc command");
+        };
+        assert!(matches!(action, VoiceRvcAction::List));
+    }
+
+    #[test]
+    fn voice_rvc_set_command_parses() {
+        let cli = Cli::try_parse_from(["kotoba", "voice", "rvc", "set", "miku"])
+            .expect("parse should succeed");
+        let Command::Voice { action } = cli.command else {
+            panic!("expected voice command");
+        };
+        let VoiceAction::Rvc { action } = action else {
+            panic!("expected voice rvc command");
+        };
+        let VoiceRvcAction::Set { name } = action else {
+            panic!("expected set action");
+        };
+        assert_eq!(name, "miku");
+    }
+
+    #[test]
+    fn voice_rvc_off_command_parses() {
+        let cli =
+            Cli::try_parse_from(["kotoba", "voice", "rvc", "off"]).expect("parse should succeed");
+        let Command::Voice { action } = cli.command else {
+            panic!("expected voice command");
+        };
+        let VoiceAction::Rvc { action } = action else {
+            panic!("expected voice rvc command");
+        };
+        assert!(matches!(action, VoiceRvcAction::Off));
     }
 }

@@ -44,6 +44,8 @@ pub struct VoicevoxConfig {
 pub struct RvcConfig {
     /// Path to Python executable with RVC dependencies installed.
     pub python: String,
+    /// Active RVC model directory name (empty string means disabled).
+    pub model:  String,
 }
 
 impl Default for VoiceConfig {

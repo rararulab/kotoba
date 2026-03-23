@@ -171,6 +171,22 @@ async fn run() -> std::result::Result<(), Box<dyn std::error::Error>> {
                     serde_json::json!({"ok": true, "action": "voice_set", "name": name})
                 );
             }
+            cli::VoiceAction::Rvc { action } => match action {
+                cli::VoiceRvcAction::List => {
+                    cli::voice::list_rvc()?;
+                }
+                cli::VoiceRvcAction::Set { name } => {
+                    let resolved = cli::voice::set_rvc(&name)?;
+                    println!(
+                        "{}",
+                        serde_json::json!({"ok": true, "action": "rvc_set", "model": resolved})
+                    );
+                }
+                cli::VoiceRvcAction::Off => {
+                    cli::voice::off_rvc()?;
+                    println!("{}", serde_json::json!({"ok": true, "action": "rvc_off"}));
+                }
+            },
         },
         Command::Huggingface { action } => match action {
             cli::HuggingFaceAction::Add { repo_id } => {

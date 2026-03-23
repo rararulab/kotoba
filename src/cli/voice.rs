@@ -106,3 +106,133 @@ pub fn set(name: &str) -> Result<()> {
     eprintln!("voice set to: {name}");
     Ok(())
 }
+
+/// An RVC model entry for display.
+#[derive(Debug, Serialize)]
+pub struct RvcModelInfo {
+    /// Directory name of the model.
+    pub name:      String,
+    /// Whether this model is currently active.
+    pub active:    bool,
+    /// Whether model.pth exists in the directory.
+    pub has_pth:   bool,
+    /// Whether model.index exists in the directory.
+    pub has_index: bool,
+}
+
+/// Scan the RVC models directory and return all valid models.
+pub fn list_rvc_models() -> Vec<RvcModelInfo> {
+    let rvc_dir = crate::paths::models_dir().join("rvc");
+    let active_model = crate::app_config::load().rvc.model.clone();
+
+    let mut models: Vec<RvcModelInfo> = Vec::new();
+
+    let Ok(entries) = std::fs::read_dir(&rvc_dir) else {
+        return models;
+    };
+
+    for entry in entries.flatten() {
+        if !entry.path().is_dir() {
+            continue;
+        }
+        let name = entry.file_name().to_string_lossy().to_string();
+        let dir = entry.path();
+        models.push(RvcModelInfo {
+            active: name == active_model,
+            has_pth: dir.join("model.pth").exists(),
+            has_index: dir.join("model.index").exists(),
+            name,
+        });
+    }
+
+    models.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
+    models
+}
+
+/// Find an RVC model by exact name or case-insensitive substring.
+///
+/// Returns `Ok(name)` if exactly one model matches, or an error describing
+/// zero / ambiguous matches.
+pub fn resolve_rvc_model(query: &str) -> Result<String> {
+    let models = list_rvc_models();
+    let valid: Vec<&RvcModelInfo> = models.iter().filter(|m| m.has_pth).collect();
+
+    // Exact match first (case-insensitive)
+    if let Some(exact) = valid.iter().find(|m| m.name.eq_ignore_ascii_case(query)) {
+        return Ok(exact.name.clone());
+    }
+
+    // Substring match (case-insensitive)
+    let query_lower = query.to_lowercase();
+    let matches: Vec<&&RvcModelInfo> = valid
+        .iter()
+        .filter(|m| m.name.to_lowercase().contains(&query_lower))
+        .collect();
+
+    match matches.len() {
+        0 => {
+            let available = valid
+                .iter()
+                .map(|m| m.name.as_str())
+                .collect::<Vec<_>>()
+                .join(", ");
+            error::VoicevoxSnafu {
+                message: format!("no RVC model matching '{query}' (available: {available})"),
+            }
+            .fail()
+        }
+        1 => Ok(matches[0].name.clone()),
+        _ => {
+            let ambiguous = matches
+                .iter()
+                .map(|m| m.name.as_str())
+                .collect::<Vec<_>>()
+                .join(", ");
+            error::VoicevoxSnafu {
+                message: format!(
+                    "'{query}' matches multiple RVC models: {ambiguous} — be more specific"
+                ),
+            }
+            .fail()
+        }
+    }
+}
+
+/// List available RVC models as JSON.
+pub fn list_rvc() -> Result<()> {
+    let models = list_rvc_models();
+    let output = serde_json::to_string_pretty(&models).context(error::JsonSnafu)?;
+    println!("{output}");
+    Ok(())
+}
+
+/// Set the active RVC model with fuzzy matching and validation.
+pub fn set_rvc(query: &str) -> Result<String> {
+    let resolved = resolve_rvc_model(query)?;
+    let mut cfg = crate::app_config::load().clone();
+    cfg.rvc.model.clone_from(&resolved);
+    crate::app_config::save(&cfg).context(error::IoSnafu)?;
+    eprintln!("rvc model set to: {resolved}");
+    Ok(resolved)
+}
+
+/// Disable RVC voice conversion.
+pub fn off_rvc() -> Result<()> {
+    let mut cfg = crate::app_config::load().clone();
+    cfg.rvc.model = String::new();
+    crate::app_config::save(&cfg).context(error::IoSnafu)?;
+    eprintln!("rvc disabled");
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn list_rvc_models_does_not_panic() {
+        // Should return a list (possibly empty) without panicking,
+        // even when the rvc directory does not exist.
+        let _models = list_rvc_models();
+    }
+}
