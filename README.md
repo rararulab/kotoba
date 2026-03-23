@@ -15,7 +15,7 @@ git clone https://github.com/rararulab/kotoba && cd kotoba && cargo install --pa
 ## Quick Start
 
 ```bash
-kotoba setup                             # Download VOICEVOX, init DB, configure default Kokoro+RVC voice
+kotoba setup                             # One-shot setup (VOICEVOX + DB + default Kokoro+RVC + CosyVoice bootstrap)
 kotoba add 成功 --level n5               # Add vocabulary (auto-fill reading + meaning)
 kotoba review                            # Show due reviews
 kotoba seen 成功 recalled                 # Record review (forgot/recognized/recalled)
@@ -82,7 +82,7 @@ kotoba huggingface list                  # List downloaded models
 ### System
 
 ```bash
-kotoba setup                             # Full setup (VOICEVOX + DB + default Kokoro+RVC voice)
+kotoba setup                             # Full setup (VOICEVOX + DB + default Kokoro+RVC + CosyVoice bootstrap)
 kotoba doctor                            # Health check all dependencies
 kotoba doctor --json                     # Machine-readable health report
 kotoba config set voice.active kokoro:af_heart  # Set config values
@@ -106,7 +106,7 @@ Default behavior:
 
 ```bash
 kotoba config set cosyvoice.autostart true   # default=true
-kotoba setup                                 # tries to detect/start CosyVoice automatically
+kotoba setup                                 # bootstraps managed CosyVoice and starts it when possible
 ```
 
 If auto-detection cannot find your CosyVoice install, set launcher manually:

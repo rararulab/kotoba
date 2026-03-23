@@ -1,4 +1,4 @@
-//! `CosyVoice` runtime lifecycle helpers (probe, infer command, autostart).
+//! `CosyVoice` runtime lifecycle helpers (bootstrap, probe, autostart).
 
 use std::{
     path::{Path, PathBuf},
@@ -6,13 +6,14 @@ use std::{
     time::Duration,
 };
 
-use snafu::{ResultExt, prelude::*};
+use snafu::{ResultExt, ensure};
 
 use crate::{
     app_config::CosyvoiceConfig,
     error::{self, Result},
 };
 
+const COSYVOICE_REPO_URL: &str = "https://github.com/FunAudioLLM/CosyVoice.git";
 const DEFAULT_MODEL_DIR: &str = "iic/CosyVoice2-0.5B";
 const HOST_TOKEN: &str = "{host}";
 const PORT_TOKEN: &str = "{port}";
@@ -23,6 +24,7 @@ pub enum CommandSource {
     Env,
     Config,
     Inferred,
+    Bootstrapped,
 }
 
 #[derive(Debug, Clone)]
@@ -69,6 +71,7 @@ pub fn parse_bind_addr(base_url: &str) -> Result<(String, u16)> {
         }
         .build()
     })?;
+
     Ok((host.to_string(), port))
 }
 
@@ -99,19 +102,34 @@ pub fn resolve_command(cfg: &CosyvoiceConfig) -> Option<ResolvedCommand> {
 
 pub fn infer_command() -> Option<String> {
     let script = infer_server_script()?;
-    let model_dir = std::env::var("COSYVOICE_MODEL_DIR")
-        .unwrap_or_else(|_| DEFAULT_MODEL_DIR.to_string())
-        .trim()
-        .to_string();
-    if model_dir.is_empty() {
-        return None;
-    }
+    let model_dir = resolved_model_dir()?;
+    let python_bin = inferred_python_bin(&script);
 
-    Some(format!(
-        "python3 {} --host {HOST_TOKEN} --port {PORT_TOKEN} --model_dir {}",
-        shell_quote(script.to_string_lossy().as_ref()),
-        shell_quote(&model_dir),
-    ))
+    Some(build_command_template(&python_bin, &script, &model_dir))
+}
+
+pub fn bootstrap_managed_install() -> Result<String> {
+    let repo_dir = crate::paths::cosyvoice_repo_dir();
+    ensure_repo_checkout(&repo_dir)?;
+    let python = ensure_managed_python_env(&repo_dir)?;
+    let script = crate::paths::cosyvoice_server_script();
+    ensure!(
+        script.is_file(),
+        error::CosyvoiceSnafu {
+            message: format!(
+                "CosyVoice server script missing after bootstrap: {}",
+                script.display()
+            ),
+        }
+    );
+    let model_dir = resolved_model_dir().ok_or_else(|| {
+        error::CosyvoiceSnafu {
+            message: "COSYVOICE_MODEL_DIR is empty".to_string(),
+        }
+        .build()
+    })?;
+
+    Ok(build_command_template(&python, &script, &model_dir))
 }
 
 pub fn expand_command(template: &str, host: &str, port: u16, url: &str) -> String {
@@ -144,25 +162,60 @@ pub async fn ensure_running(cfg: &CosyvoiceConfig) -> Result<()> {
         }
     );
 
-    let resolved = resolve_command(cfg).ok_or_else(|| {
-        error::CosyvoiceSnafu {
-            message: format!(
-                "CosyVoice runtime not reachable at {base_url}. No launch command found. Set \
-                 cosyvoice.command or COSYVOICE_CMD, or place CosyVoice at a default location \
-                 (~/CosyVoice or ~/.kotoba/cosyvoice/CosyVoice)."
-            ),
+    let mut resolved = if let Some(command) = resolve_command(cfg) {
+        command
+    } else {
+        eprintln!("  no cosyvoice command found, bootstrapping managed runtime...");
+        ResolvedCommand {
+            source:   CommandSource::Bootstrapped,
+            template: bootstrap_managed_install()?,
         }
-        .build()
-    })?;
+    };
 
     if matches!(resolved.source, CommandSource::Inferred) {
         eprintln!("  detected cosyvoice runtime command from local installation");
     }
-    eprintln!("  cosyvoice runtime not reachable, starting...");
-    start_runtime(&base_url, &resolved.template)?;
-    wait_for_ready(&base_url, Duration::from_secs(90)).await?;
-    eprintln!("  cosyvoice runtime ready at {base_url}");
-    Ok(())
+
+    let mut first_error: Option<error::KotobaError> = None;
+    for attempt in 0..2 {
+        eprintln!("  cosyvoice runtime not reachable, starting...");
+        match start_and_wait(&base_url, &resolved.template).await {
+            Ok(()) => {
+                eprintln!("  cosyvoice runtime ready at {base_url}");
+                return Ok(());
+            }
+            Err(err) => {
+                if first_error.is_none() {
+                    first_error = Some(err);
+                }
+
+                if attempt == 0 && matches!(resolved.source, CommandSource::Inferred) {
+                    eprintln!(
+                        "  inferred runtime failed to start; trying managed bootstrap fallback..."
+                    );
+                    resolved = ResolvedCommand {
+                        source:   CommandSource::Bootstrapped,
+                        template: bootstrap_managed_install()?,
+                    };
+                    continue;
+                }
+
+                break;
+            }
+        }
+    }
+
+    Err(first_error.unwrap_or_else(|| {
+        error::CosyvoiceSnafu {
+            message: format!("failed to start CosyVoice runtime at {base_url}"),
+        }
+        .build()
+    }))
+}
+
+async fn start_and_wait(base_url: &str, command_template: &str) -> Result<()> {
+    start_runtime(base_url, command_template)?;
+    wait_for_ready(base_url, Duration::from_secs(90)).await
 }
 
 fn start_runtime(base_url: &str, command_template: &str) -> Result<()> {
@@ -222,8 +275,161 @@ async fn wait_for_ready(base_url: &str, timeout: Duration) -> Result<()> {
     .fail()
 }
 
+fn ensure_repo_checkout(repo_dir: &Path) -> Result<()> {
+    let server_script = crate::paths::cosyvoice_server_script();
+    if server_script.is_file() {
+        return Ok(());
+    }
+
+    ensure!(
+        command_exists("git"),
+        error::CosyvoiceSnafu {
+            message: "git is required to bootstrap CosyVoice runtime".to_string(),
+        }
+    );
+
+    let base_dir = crate::paths::cosyvoice_dir();
+    std::fs::create_dir_all(&base_dir).context(error::IoSnafu)?;
+
+    if !repo_dir.exists() {
+        run_checked(
+            Command::new("git")
+                .arg("clone")
+                .arg("--depth")
+                .arg("1")
+                .arg("--recursive")
+                .arg(COSYVOICE_REPO_URL)
+                .arg(repo_dir),
+            "clone CosyVoice repository",
+        )?;
+    } else if repo_dir.join(".git").is_dir() {
+        run_checked(
+            Command::new("git")
+                .arg("-C")
+                .arg(repo_dir)
+                .arg("submodule")
+                .arg("update")
+                .arg("--init")
+                .arg("--recursive"),
+            "initialize CosyVoice submodules",
+        )?;
+    }
+
+    ensure!(
+        server_script.is_file(),
+        error::CosyvoiceSnafu {
+            message: format!(
+                "CosyVoice server script not found after clone: {}",
+                server_script.display()
+            ),
+        }
+    );
+
+    Ok(())
+}
+
+fn ensure_managed_python_env(repo_dir: &Path) -> Result<String> {
+    let venv_dir = crate::paths::cosyvoice_venv_dir();
+    if resolve_venv_python().is_none() {
+        if let Some(parent) = venv_dir.parent() {
+            std::fs::create_dir_all(parent).context(error::IoSnafu)?;
+        }
+
+        if command_exists("uv") {
+            run_checked(
+                Command::new("uv")
+                    .arg("venv")
+                    .arg("--python")
+                    .arg("3.10")
+                    .arg(&venv_dir),
+                "create CosyVoice venv with uv",
+            )?;
+        } else {
+            ensure!(
+                command_exists("python3"),
+                error::CosyvoiceSnafu {
+                    message: "python3 is required to bootstrap CosyVoice runtime".to_string(),
+                }
+            );
+            run_checked(
+                Command::new("python3").arg("-m").arg("venv").arg(&venv_dir),
+                "create CosyVoice venv",
+            )?;
+        }
+    }
+
+    let python = resolve_venv_python().ok_or_else(|| {
+        error::CosyvoiceSnafu {
+            message: format!(
+                "managed CosyVoice venv is missing python executable at {}",
+                crate::paths::cosyvoice_venv_dir().display()
+            ),
+        }
+        .build()
+    })?;
+
+    let requirements = repo_dir.join("requirements.txt");
+    ensure!(
+        requirements.is_file(),
+        error::CosyvoiceSnafu {
+            message: format!(
+                "CosyVoice requirements file missing: {}",
+                requirements.display()
+            ),
+        }
+    );
+
+    let stamp = crate::paths::cosyvoice_requirements_stamp();
+    if !stamp.is_file() {
+        run_checked(
+            Command::new(&python)
+                .arg("-m")
+                .arg("pip")
+                .arg("install")
+                .arg("--upgrade")
+                .arg("pip"),
+            "upgrade pip for CosyVoice venv",
+        )?;
+
+        run_checked(
+            Command::new(&python)
+                .arg("-m")
+                .arg("pip")
+                .arg("install")
+                .arg("-r")
+                .arg(&requirements),
+            "install CosyVoice runtime dependencies",
+        )?;
+
+        if let Some(parent) = stamp.parent() {
+            std::fs::create_dir_all(parent).context(error::IoSnafu)?;
+        }
+        std::fs::write(&stamp, "ok\n").context(error::IoSnafu)?;
+    }
+
+    Ok(python.to_string_lossy().into_owned())
+}
+
+fn resolve_venv_python() -> Option<PathBuf> {
+    let primary = crate::paths::cosyvoice_venv_python();
+    if path_exists(&primary) {
+        return Some(primary);
+    }
+
+    if cfg!(windows) {
+        None
+    } else {
+        let fallback = crate::paths::cosyvoice_venv_dir()
+            .join("bin")
+            .join("python");
+        path_exists(&fallback).then_some(fallback)
+    }
+}
+
 fn infer_server_script() -> Option<PathBuf> {
     let mut candidates: Vec<PathBuf> = Vec::new();
+
+    candidates.push(crate::paths::cosyvoice_server_script());
 
     if let Ok(home) = std::env::var("COSYVOICE_HOME") {
         let home = PathBuf::from(home);
@@ -233,7 +439,6 @@ fn infer_server_script() -> Option<PathBuf> {
 
     if let Some(home) = dirs::home_dir() {
         candidates.push(home.join("CosyVoice/runtime/python/fastapi/server.py"));
-        candidates.push(home.join(".kotoba/cosyvoice/CosyVoice/runtime/python/fastapi/server.py"));
         candidates.push(home.join("code/CosyVoice/runtime/python/fastapi/server.py"));
         candidates.push(home.join("workspace/CosyVoice/runtime/python/fastapi/server.py"));
     }
@@ -243,6 +448,84 @@ fn infer_server_script() -> Option<PathBuf> {
     ));
 
     candidates.into_iter().find(|path| path_exists(path))
+}
+
+fn inferred_python_bin(script: &Path) -> String {
+    if let Ok(python) = std::env::var("COSYVOICE_PYTHON") {
+        let python = python.trim();
+        if !python.is_empty() {
+            return python.to_string();
+        }
+    }
+
+    let managed_repo = crate::paths::cosyvoice_repo_dir();
+    if script.starts_with(&managed_repo)
+        && let Some(managed_python) = resolve_venv_python()
+    {
+        return managed_python.to_string_lossy().into_owned();
+    }
+
+    if cfg!(windows) {
+        "python".to_string()
+    } else {
+        "python3".to_string()
+    }
+}
+
+fn resolved_model_dir() -> Option<String> {
+    let model_dir = std::env::var("COSYVOICE_MODEL_DIR")
+        .unwrap_or_else(|_| DEFAULT_MODEL_DIR.to_string())
+        .trim()
+        .to_string();
+    (!model_dir.is_empty()).then_some(model_dir)
+}
+
+fn build_command_template(python_bin: &str, server_script: &Path, model_dir: &str) -> String {
+    format!(
+        "{} {} --host {HOST_TOKEN} --port {PORT_TOKEN} --model_dir {}",
+        shell_quote(python_bin),
+        shell_quote(server_script.to_string_lossy().as_ref()),
+        shell_quote(model_dir),
+    )
+}
+
+fn run_checked(command: &mut Command, label: &str) -> Result<()> {
+    let output = command.output().context(error::IoSnafu)?;
+    if output.status.success() {
+        return Ok(());
+    }
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    let mut detail = stderr.trim().to_string();
+    if detail.is_empty() {
+        detail = stdout.trim().to_string();
+    }
+    if detail.chars().count() > 600 {
+        detail = detail.chars().take(600).collect();
+    }
+
+    error::CosyvoiceSnafu {
+        message: format!(
+            "{label} failed (status {}): {}",
+            output.status,
+            if detail.is_empty() {
+                "(no output)".to_string()
+            } else {
+                detail
+            }
+        ),
+    }
+    .fail()
+}
+
+fn command_exists(name: &str) -> bool {
+    Command::new(name)
+        .arg("--version")
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status()
+        .is_ok()
 }
 
 fn path_exists(path: &Path) -> bool { std::fs::metadata(path).is_ok_and(|meta| meta.is_file()) }

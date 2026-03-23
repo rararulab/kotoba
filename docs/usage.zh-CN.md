@@ -23,10 +23,11 @@ kotoba --help
 kotoba setup
 ```
 
-`setup` 会做四件事：
+`setup` 会做这些事：
 - 初始化数据库
 - 安装 VOICEVOX 引擎
 - 下载默认的 Kokoro + 花泽香菜（中野一花）RVC 模型
+- 尝试一键准备 CosyVoice runtime（clone + venv + 依赖）并自动拉起
 - 写入默认语音配置（`voice.active`）并把 `voice.speed` 设为 `0.90`
 
 如果你只想先建库，不下语音引擎，也可以：

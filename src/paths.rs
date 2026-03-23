@@ -37,6 +37,33 @@ pub fn cosyvoice_dir() -> PathBuf { data_dir().join("cosyvoice") }
 /// `CosyVoice` runtime log file: `<data>/cosyvoice/runtime.log`
 pub fn cosyvoice_log_file() -> PathBuf { cosyvoice_dir().join("runtime.log") }
 
+/// Managed `CosyVoice` checkout root: `<data>/cosyvoice/CosyVoice`
+pub fn cosyvoice_repo_dir() -> PathBuf { cosyvoice_dir().join("CosyVoice") }
+
+/// Managed `CosyVoice` server script path.
+pub fn cosyvoice_server_script() -> PathBuf {
+    cosyvoice_repo_dir()
+        .join("runtime")
+        .join("python")
+        .join("fastapi")
+        .join("server.py")
+}
+
+/// Managed `CosyVoice` Python venv directory: `<data>/venvs/cosyvoice`
+pub fn cosyvoice_venv_dir() -> PathBuf { data_dir().join("venvs").join("cosyvoice") }
+
+/// Managed `CosyVoice` venv python executable.
+pub fn cosyvoice_venv_python() -> PathBuf {
+    if cfg!(windows) {
+        cosyvoice_venv_dir().join("Scripts").join("python.exe")
+    } else {
+        cosyvoice_venv_dir().join("bin").join("python3")
+    }
+}
+
+/// Managed `CosyVoice` dependency stamp file.
+pub fn cosyvoice_requirements_stamp() -> PathBuf { cosyvoice_dir().join(".requirements_installed") }
+
 /// Audio cache directory: `<data>/audio`
 pub fn audio_cache_dir() -> PathBuf { data_dir().join("audio") }
 

@@ -92,13 +92,23 @@ pub async fn run(db: &Database) -> Result<SetupResult> {
 
     let mut updated = app_config::load().clone();
     let mut cosyvoice_configured = false;
-    if updated.cosyvoice.command.trim().is_empty()
-        && std::env::var("COSYVOICE_CMD").is_err()
-        && let Some(inferred) = crate::cosyvoice_runtime::infer_command()
-    {
-        updated.cosyvoice.command = inferred;
-        cosyvoice_configured = true;
-        eprintln!("  auto-detected CosyVoice runtime command");
+    if updated.cosyvoice.command.trim().is_empty() && std::env::var("COSYVOICE_CMD").is_err() {
+        eprintln!("  preparing managed CosyVoice runtime (clone + venv + deps)...");
+        match crate::cosyvoice_runtime::bootstrap_managed_install() {
+            Ok(command_template) => {
+                updated.cosyvoice.command = command_template;
+                cosyvoice_configured = true;
+                eprintln!("  managed CosyVoice runtime prepared");
+            }
+            Err(err) => {
+                eprintln!("  managed CosyVoice bootstrap failed: {err}");
+                if let Some(inferred) = crate::cosyvoice_runtime::infer_command() {
+                    updated.cosyvoice.command = inferred;
+                    cosyvoice_configured = true;
+                    eprintln!("  fell back to auto-detected local CosyVoice command");
+                }
+            }
+        }
     }
 
     apply_default_voice_preset(&mut updated, &rvc_result.model);
@@ -110,22 +120,13 @@ pub async fn run(db: &Database) -> Result<SetupResult> {
 
     ensure_voicevox_running(&voicevox_url).await?;
 
-    let cosyvoice_running = if crate::cosyvoice_runtime::is_api_ready(
-        &crate::cosyvoice_runtime::base_url(&updated.cosyvoice),
-    )
-    .await
+    let cosyvoice_running = match crate::cosyvoice_runtime::ensure_running(&updated.cosyvoice).await
     {
-        true
-    } else if updated.cosyvoice.autostart {
-        match crate::cosyvoice_runtime::ensure_running(&updated.cosyvoice).await {
-            Ok(()) => true,
-            Err(err) => {
-                eprintln!("  cosyvoice runtime not ready: {err}");
-                false
-            }
+        Ok(()) => true,
+        Err(err) => {
+            eprintln!("  cosyvoice runtime not ready: {err}");
+            false
         }
-    } else {
-        false
     };
 
     eprintln!("setup complete!");
