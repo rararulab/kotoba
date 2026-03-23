@@ -12,7 +12,9 @@ use snafu::ResultExt;
 use crate::{
     cli::PlayStyle,
     error::{self, Result},
-    tts::{KokoroBackend, TtsBackend, VitsBackend, VoicevoxBackend, VoicevoxProsody},
+    tts::{
+        CosyvoiceBackend, KokoroBackend, TtsBackend, VitsBackend, VoicevoxBackend, VoicevoxProsody,
+    },
 };
 
 /// Parsed voice configuration specifying backend and speaker/model identifier.
@@ -128,6 +130,7 @@ pub async fn play_word(word: &str, enable: bool, style: PlayStyle) -> Result<Pat
     } else {
         String::new()
     };
+    let cosyvoice_cfg = cfg.cosyvoice.clone();
     let rvc_model_cfg = cfg.rvc.model.trim().to_string();
     let rvc_model = if rvc_model_cfg.is_empty() {
         None
@@ -140,6 +143,7 @@ pub async fn play_word(word: &str, enable: bool, style: PlayStyle) -> Result<Pat
         "voicevox" => "voicevox",
         "vits" => "vits",
         "kokoro" => "kokoro",
+        "cosyvoice" => "cosyvoice",
         other => {
             return error::VoicevoxSnafu {
                 message: format!("unknown voice backend: {other}"),
@@ -171,6 +175,17 @@ pub async fn play_word(word: &str, enable: bool, style: PlayStyle) -> Result<Pat
                 let backend = KokoroBackend::new(
                     kokoro_voice.clone(),
                     stabilized_kokoro_speed(segment_speed, base_speed, rvc_enabled),
+                );
+                backend.synthesize(segment, &segment_file).await
+            }
+            "cosyvoice" => {
+                let backend = CosyvoiceBackend::new(
+                    cosyvoice_cfg.url.clone(),
+                    cosyvoice_cfg.mode.clone(),
+                    config.speaker_id.clone(),
+                    cosyvoice_cfg.prompt_text.clone(),
+                    cosyvoice_cfg.prompt_wav.clone(),
+                    cosyvoice_cfg.instruct_text.clone(),
                 );
                 backend.synthesize(segment, &segment_file).await
             }
@@ -1010,6 +1025,13 @@ mod tests {
         let config = parse_voice_config("kokoro:jf_alpha");
         assert_eq!(config.backend, "kokoro");
         assert_eq!(config.speaker_id, "jf_alpha");
+    }
+
+    #[test]
+    fn parse_voice_config_cosyvoice() {
+        let config = parse_voice_config("cosyvoice:default");
+        assert_eq!(config.backend, "cosyvoice");
+        assert_eq!(config.speaker_id, "default");
     }
 
     #[test]

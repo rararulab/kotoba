@@ -177,6 +177,31 @@ kotoba voice rvc off
 
 模糊匹配：输入名称的任意子串即可，大小写不敏感。如果匹配到多个模型会提示你输入更精确的名称。
 
+### 5.6 CosyVoice（免训练克隆路线）
+
+如果你不想训练 RVC，可以直接接 CosyVoice runtime：
+
+```bash
+# 1) 指向 CosyVoice 服务地址（默认 127.0.0.1:50000）
+kotoba config set cosyvoice.url http://127.0.0.1:50000
+
+# 2) 先用 sft 模式（最简单）
+kotoba config set cosyvoice.mode sft
+
+# 3) 选择 CosyVoice speaker/profile
+kotoba voice set cosyvoice:中文女
+kotoba play こんにちは --enable
+```
+
+零样本克隆常用配置（需 CosyVoice 侧已启用对应接口）：
+
+```bash
+kotoba config set cosyvoice.mode zero_shot
+kotoba config set cosyvoice.prompt_text 希望你以后能够做的比我还好呦。
+kotoba config set cosyvoice.prompt_wav /abs/path/prompt.wav
+kotoba voice set cosyvoice:clone
+```
+
 ## 6. 怎么添加动漫角色 model（重点）
 
 动漫角色声音走 **Kokoro + RVC** pipeline：

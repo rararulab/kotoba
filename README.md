@@ -63,6 +63,9 @@ kotoba voice list                        # List available voices
 kotoba voice set voicevox:3              # Use VOICEVOX speaker 3
 kotoba voice set kokoro:af_heart         # Use Kokoro ONNX (local, no server needed)
 kotoba voice set kokoro:af_heart+rvc:naruto  # Kokoro + RVC voice conversion
+kotoba voice set cosyvoice:中文女         # Use CosyVoice speaker/profile from runtime
+kotoba config set cosyvoice.url http://127.0.0.1:50000
+kotoba config set cosyvoice.mode sft
 kotoba config set voice.speed 0.85       # Slow down speech speed
 ```
 
@@ -91,6 +94,7 @@ kotoba config set voice.active kokoro:af_heart  # Set config values
 | `voicevox` | `voicevox:<speaker_id>` | VOICEVOX Engine running (`kotoba setup`) |
 | `kokoro` | `kokoro:<voice>` | Kokoro ONNX model (`kotoba huggingface add kokoro`) |
 | `vits` | `vits:<model>` | VITS model (`kotoba huggingface add user/model`) |
+| `cosyvoice` | `cosyvoice:<spk_id>` | CosyVoice runtime API at `cosyvoice.url` |
 | `kokoro+rvc` | `kokoro:<voice>+rvc:<model>` | Kokoro model + RVC model + Python venv (see below) |
 
 ## RVC Voice Conversion Setup
