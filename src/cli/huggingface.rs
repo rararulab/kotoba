@@ -249,7 +249,9 @@ async fn add_rvc(input: &str) -> Result<ModelAddResult> {
         _ => (input, None),
     };
 
-    let model_name = repo_id.split('/').next_back().unwrap_or(repo_id);
+    let model_name = subpath
+        .and_then(|s| s.rsplit('/').next())
+        .unwrap_or_else(|| repo_id.split('/').next_back().unwrap_or(repo_id));
     let model_dir = crate::paths::models_dir().join("rvc").join(model_name);
     let pth_path = model_dir.join("model.pth");
 
