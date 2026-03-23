@@ -81,7 +81,45 @@ kotoba config set voice.active kokoro:af_heart  # Set config values
 | `voicevox` | `voicevox:<speaker_id>` | VOICEVOX Engine running (`kotoba setup`) |
 | `kokoro` | `kokoro:<voice>` | Kokoro ONNX model (`kotoba huggingface add kokoro`) |
 | `vits` | `vits:<model>` | VITS model (`kotoba huggingface add user/model`) |
-| `kokoro+rvc` | `kokoro:<voice>+rvc:<model>` | Kokoro model + RVC model; Python sidecar auto-starts |
+| `kokoro+rvc` | `kokoro:<voice>+rvc:<model>` | Kokoro model + RVC model + Python venv (see below) |
+
+## RVC Voice Conversion Setup
+
+RVC (Retrieval-based Voice Conversion) lets you transform Kokoro TTS output into anime character voices.
+
+### 1. Create Python environment
+
+```bash
+uv venv --python 3.10 ~/.kotoba/venvs/rvc
+uv pip install --python ~/.kotoba/venvs/rvc/bin/python3 \
+  infer-rvc-python soundfile "setuptools<81" "numpy<2"
+```
+
+### 2. Download models
+
+```bash
+kotoba huggingface add kokoro                              # Base TTS model
+kotoba huggingface add rvc:user/model                      # RVC model from HuggingFace
+kotoba huggingface add rvc:ttttdiva/rvc_okiba:Hatsune_Miku # Multi-model repo with subpath
+```
+
+### 3. Set voice and test
+
+```bash
+kotoba voice set kokoro:af_heart+rvc:Hatsune_Miku
+kotoba play こんにちは
+```
+
+### Custom Python path
+
+If your Python is not at `~/.kotoba/venvs/rvc/bin/python3`:
+
+```bash
+export RVC_PYTHON=/path/to/python3               # env var (temporary)
+kotoba config set rvc.python /path/to/python3     # config (permanent)
+```
+
+Run `kotoba doctor` to verify setup.
 
 ## License
 
