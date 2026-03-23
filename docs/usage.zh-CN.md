@@ -76,11 +76,27 @@ kotoba voice list
 kotoba voice set voicevox:3
 ```
 
+### 5.5 RVC 模型管理
+
+```bash
+# 查看所有已下载的 RVC 模型
+kotoba voice rvc list
+
+# 设置 RVC 模型（支持模糊匹配）
+kotoba voice rvc set miku
+kotoba voice rvc set ichika
+
+# 关闭 RVC
+kotoba voice rvc off
+```
+
+模糊匹配：输入名称的任意子串即可，大小写不敏感。如果匹配到多个模型会提示你输入更精确的名称。
+
 ## 6. 怎么添加动漫角色 model（重点）
 
-动漫角色声音一般走 **RVC 模型**。在 Kotoba 里通常是：
-- 基础 TTS 用 `kokoro:<voice>` 生成音频
-- 再用 `+rvc:<model>` 做角色音色转换
+动漫角色声音一般走 **RVC 模型**。在 Kotoba 里分两步配置：
+- 基础 TTS 用 `voice.active`（如 `kokoro:jf_alpha`）控制发音
+- 角色音色用 `rvc.model` 控制（如花泽香菜 RVC 模型）
 
 ### 6.1 下载 Kokoro 基础模型（一次即可）
 
@@ -105,16 +121,36 @@ kotoba huggingface add rvc:some-user/naruto-rvc-v2
 
 注意：实际模型名取仓库最后一段，也就是这里的 `naruto-rvc-v2`。
 
-### 6.3 启用“基础音色 + 角色模型”
+### 6.3 启用基础音色和角色模型
+
+Base voice 和 RVC model **分开设置**，互不影响：
 
 ```bash
-kotoba voice set kokoro:af_heart+rvc:naruto-rvc-v2
+# 设置基础 TTS 声音（控制发音）
+kotoba voice set kokoro:jf_alpha
+
+# 设置 RVC 角色模型（支持模糊匹配）
+kotoba voice rvc set naruto
 ```
+
+> **⚠️ 重要：Kokoro 的 base voice 必须和目标语言匹配。**
+>
+> 日语用 `jf_*` / `jm_*`（如 `jf_alpha`），英语用 `af_*` / `am_*`（如 `af_heart`）。
+> 如果用英语 voice 播放日语文本，发音会完全错误——RVC 只改音色，不修正发音。
+>
+> | 前缀 | 语言 | 示例 |
+> |------|------|------|
+> | `jf_` | 日语女声 | `jf_alpha`, `jf_beta` |
+> | `jm_` | 日语男声 | `jm_alpha`, `jm_beta` |
+> | `af_` | 英语女声 | `af_heart`, `af_sky` |
+> | `am_` | 英语男声 | `am_adam` |
+>
+> 要关闭 RVC（只用基础 TTS）：`kotoba voice rvc off`
 
 ### 6.4 测试
 
 ```bash
-kotoba play こんにちは
+kotoba play こんにちは --enable
 ```
 
 ## 7. 手动添加本地角色模型（不走下载命令）
@@ -129,7 +165,7 @@ kotoba play こんにちは
 然后设置：
 
 ```bash
-kotoba voice set kokoro:af_heart+rvc:<model_name>
+kotoba voice rvc set <model_name>
 ```
 
 ## 8. 常见问题
