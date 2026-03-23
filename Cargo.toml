@@ -1,6 +1,6 @@
 [package]
 name = "kotoba"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2024"
 description = "Immersive Japanese language learning CLI with SRS and TTS"
 license = "MIT"
