@@ -125,25 +125,24 @@ pub fn list_rvc_models() -> Vec<RvcModelInfo> {
     let rvc_dir = crate::paths::models_dir().join("rvc");
     let active_model = crate::app_config::load().rvc.model.clone();
 
-    let mut models: Vec<RvcModelInfo> = Vec::new();
-
     let Ok(entries) = std::fs::read_dir(&rvc_dir) else {
-        return models;
+        return Vec::new();
     };
 
-    for entry in entries.flatten() {
-        if !entry.path().is_dir() {
-            continue;
-        }
-        let name = entry.file_name().to_string_lossy().to_string();
-        let dir = entry.path();
-        models.push(RvcModelInfo {
-            active: name == active_model,
-            has_pth: dir.join("model.pth").exists(),
-            has_index: dir.join("model.index").exists(),
-            name,
-        });
-    }
+    let mut models: Vec<RvcModelInfo> = entries
+        .flatten()
+        .filter(|e| e.path().is_dir())
+        .map(|entry| {
+            let name = entry.file_name().to_string_lossy().to_string();
+            let dir = entry.path();
+            RvcModelInfo {
+                active: name == active_model,
+                has_pth: dir.join("model.pth").exists(),
+                has_index: dir.join("model.index").exists(),
+                name,
+            }
+        })
+        .collect();
 
     models.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
     models
@@ -176,7 +175,7 @@ pub fn resolve_rvc_model(query: &str) -> Result<String> {
                 .map(|m| m.name.as_str())
                 .collect::<Vec<_>>()
                 .join(", ");
-            error::VoicevoxSnafu {
+            error::RvcSnafu {
                 message: format!("no RVC model matching '{query}' (available: {available})"),
             }
             .fail()
@@ -188,7 +187,7 @@ pub fn resolve_rvc_model(query: &str) -> Result<String> {
                 .map(|m| m.name.as_str())
                 .collect::<Vec<_>>()
                 .join(", ");
-            error::VoicevoxSnafu {
+            error::RvcSnafu {
                 message: format!(
                     "'{query}' matches multiple RVC models: {ambiguous} — be more specific"
                 ),
