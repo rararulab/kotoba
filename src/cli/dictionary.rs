@@ -1,5 +1,6 @@
-//! Lightweight dictionary lookup for auto-filling vocabulary metadata.
+//! Dictionary lookup abstraction for auto-filling vocabulary metadata.
 
+use async_trait::async_trait;
 use serde::Deserialize;
 use snafu::ResultExt;
 
@@ -11,6 +12,67 @@ pub struct AutoFillResult {
     pub reading: String,
     pub meaning: String,
 }
+
+/// Pluggable dictionary backend interface.
+#[async_trait]
+pub trait DictionaryBackend {
+    /// Stable backend identifier for diagnostics.
+    fn name(&self) -> &'static str;
+
+    /// Lookup a word and return reading + meaning when found.
+    ///
+    /// `Ok(None)` means "not found in this backend", allowing fallback.
+    async fn lookup(&self, word: &str) -> Result<Option<AutoFillResult>>;
+}
+
+/// Dictionary service that tries backends in order.
+pub struct DictionaryService {
+    backends: Vec<Box<dyn DictionaryBackend + Send + Sync>>,
+}
+
+impl Default for DictionaryService {
+    fn default() -> Self { Self::with_backends(vec![Box::new(JishoBackend)]) }
+}
+
+impl DictionaryService {
+    /// Create a service with explicitly ordered backends.
+    pub fn with_backends(backends: Vec<Box<dyn DictionaryBackend + Send + Sync>>) -> Self {
+        Self { backends }
+    }
+
+    /// Lookup by trying configured backends in order.
+    pub async fn lookup(&self, word: &str) -> Result<AutoFillResult> {
+        let mut failures: Vec<String> = Vec::new();
+
+        for backend in &self.backends {
+            match backend.lookup(word).await {
+                Ok(Some(result)) => return Ok(result),
+                Ok(None) => failures.push(format!("{}: no result", backend.name())),
+                Err(err) => failures.push(format!("{}: {err}", backend.name())),
+            }
+        }
+
+        let message = if failures.is_empty() {
+            "no dictionary backend configured".to_string()
+        } else {
+            failures.join("; ")
+        };
+
+        error::WordLookupSnafu {
+            word: word.to_string(),
+            message,
+        }
+        .fail()
+    }
+}
+
+/// Lookup reading and meaning using configured dictionary backends.
+pub async fn lookup(word: &str) -> Result<AutoFillResult> {
+    DictionaryService::default().lookup(word).await
+}
+
+/// Jisho backend implementation.
+struct JishoBackend;
 
 #[derive(Debug, Deserialize)]
 struct JishoResponse {
@@ -34,28 +96,26 @@ struct Sense {
     english_definitions: Vec<String>,
 }
 
-/// Lookup reading and meaning from Jisho for a Japanese word.
-pub async fn lookup(word: &str) -> Result<AutoFillResult> {
-    let response: JishoResponse = crate::http::client()
-        .get("https://jisho.org/api/v1/search/words")
-        .query(&[("keyword", word)])
-        .send()
-        .await
-        .context(error::HttpSnafu)?
-        .json()
-        .await
-        .context(error::HttpSnafu)?;
+#[async_trait]
+impl DictionaryBackend for JishoBackend {
+    fn name(&self) -> &'static str { "jisho" }
 
-    parse_lookup(word, &response).ok_or_else(|| {
-        error::WordLookupSnafu {
-            word:    word.to_string(),
-            message: "no usable dictionary result".to_string(),
-        }
-        .build()
-    })
+    async fn lookup(&self, word: &str) -> Result<Option<AutoFillResult>> {
+        let response: JishoResponse = crate::http::client()
+            .get("https://jisho.org/api/v1/search/words")
+            .query(&[("keyword", word)])
+            .send()
+            .await
+            .context(error::HttpSnafu)?
+            .json()
+            .await
+            .context(error::HttpSnafu)?;
+
+        Ok(parse_jisho_lookup(word, &response))
+    }
 }
 
-fn parse_lookup(query: &str, response: &JishoResponse) -> Option<AutoFillResult> {
+fn parse_jisho_lookup(query: &str, response: &JishoResponse) -> Option<AutoFillResult> {
     let entry = response
         .data
         .iter()
@@ -85,8 +145,42 @@ fn parse_lookup(query: &str, response: &JishoResponse) -> Option<AutoFillResult>
 mod tests {
     use super::*;
 
+    enum StaticBehavior {
+        Hit {
+            reading: &'static str,
+            meaning: &'static str,
+        },
+        Miss,
+        Fail,
+    }
+
+    struct StaticBackend {
+        name:     &'static str,
+        behavior: StaticBehavior,
+    }
+
+    #[async_trait]
+    impl DictionaryBackend for StaticBackend {
+        fn name(&self) -> &'static str { self.name }
+
+        async fn lookup(&self, _word: &str) -> Result<Option<AutoFillResult>> {
+            match self.behavior {
+                StaticBehavior::Hit { reading, meaning } => Ok(Some(AutoFillResult {
+                    reading: reading.to_string(),
+                    meaning: meaning.to_string(),
+                })),
+                StaticBehavior::Miss => Ok(None),
+                StaticBehavior::Fail => error::WordLookupSnafu {
+                    word:    "x".to_string(),
+                    message: "upstream error".to_string(),
+                }
+                .fail(),
+            }
+        }
+    }
+
     #[test]
-    fn parse_lookup_prefers_exact_word_match() {
+    fn parse_jisho_lookup_prefers_exact_word_match() {
         let payload = r#"{
             "data": [
                 {
@@ -101,7 +195,7 @@ mod tests {
         }"#;
 
         let response: JishoResponse = serde_json::from_str(payload).expect("valid fixture");
-        let result = parse_lookup("成功", &response).expect("lookup should succeed");
+        let result = parse_jisho_lookup("成功", &response).expect("lookup should succeed");
 
         assert_eq!(
             result,
@@ -113,7 +207,7 @@ mod tests {
     }
 
     #[test]
-    fn parse_lookup_falls_back_to_first_entry() {
+    fn parse_jisho_lookup_falls_back_to_first_entry() {
         let payload = r#"{
             "data": [
                 {
@@ -124,7 +218,8 @@ mod tests {
         }"#;
 
         let response: JishoResponse = serde_json::from_str(payload).expect("valid fixture");
-        let result = parse_lookup("未知語", &response).expect("fallback lookup should succeed");
+        let result =
+            parse_jisho_lookup("未知語", &response).expect("fallback lookup should succeed");
 
         assert_eq!(
             result,
@@ -133,5 +228,75 @@ mod tests {
                 meaning: "cat".to_string(),
             }
         );
+    }
+
+    #[tokio::test]
+    async fn service_uses_first_successful_backend() {
+        let service = DictionaryService::with_backends(vec![
+            Box::new(StaticBackend {
+                name:     "primary",
+                behavior: StaticBehavior::Hit {
+                    reading: "せいこう",
+                    meaning: "success",
+                },
+            }),
+            Box::new(StaticBackend {
+                name:     "secondary",
+                behavior: StaticBehavior::Hit {
+                    reading: "fallback",
+                    meaning: "fallback",
+                },
+            }),
+        ]);
+
+        let result = service.lookup("成功").await.expect("lookup should succeed");
+        assert_eq!(result.reading, "せいこう");
+        assert_eq!(result.meaning, "success");
+    }
+
+    #[tokio::test]
+    async fn service_falls_back_when_backend_returns_none() {
+        let service = DictionaryService::with_backends(vec![
+            Box::new(StaticBackend {
+                name:     "empty",
+                behavior: StaticBehavior::Miss,
+            }),
+            Box::new(StaticBackend {
+                name:     "fallback",
+                behavior: StaticBehavior::Hit {
+                    reading: "ねこ",
+                    meaning: "cat",
+                },
+            }),
+        ]);
+
+        let result = service
+            .lookup("猫")
+            .await
+            .expect("fallback lookup should succeed");
+        assert_eq!(result.reading, "ねこ");
+        assert_eq!(result.meaning, "cat");
+    }
+
+    #[tokio::test]
+    async fn service_returns_word_lookup_when_all_backends_fail() {
+        let service = DictionaryService::with_backends(vec![
+            Box::new(StaticBackend {
+                name:     "empty",
+                behavior: StaticBehavior::Miss,
+            }),
+            Box::new(StaticBackend {
+                name:     "broken",
+                behavior: StaticBehavior::Fail,
+            }),
+        ]);
+
+        let err = service
+            .lookup("未知語")
+            .await
+            .expect_err("lookup should fail");
+        let msg = err.to_string();
+        assert!(msg.contains("empty: no result"));
+        assert!(msg.contains("broken:"));
     }
 }
