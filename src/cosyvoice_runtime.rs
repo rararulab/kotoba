@@ -2,7 +2,7 @@
 
 use std::{
     path::{Path, PathBuf},
-    process::{Command, Stdio},
+    process::{Child, Command, Stdio},
     time::Duration,
 };
 
@@ -15,6 +15,7 @@ use crate::{
 
 const COSYVOICE_REPO_URL: &str = "https://github.com/FunAudioLLM/CosyVoice.git";
 const DEFAULT_MODEL_DIR: &str = "iic/CosyVoice2-0.5B";
+const DEFAULT_STARTUP_TIMEOUT_SECS: u64 = 1_800;
 const HOST_TOKEN: &str = "{host}";
 const PORT_TOKEN: &str = "{port}";
 const URL_TOKEN: &str = "{url}";
@@ -81,7 +82,7 @@ pub fn resolve_command(cfg: &CosyvoiceConfig) -> Option<ResolvedCommand> {
         if !trimmed.is_empty() {
             return Some(ResolvedCommand {
                 source:   CommandSource::Env,
-                template: trimmed.to_string(),
+                template: normalize_command_template(trimmed),
             });
         }
     }
@@ -90,7 +91,7 @@ pub fn resolve_command(cfg: &CosyvoiceConfig) -> Option<ResolvedCommand> {
     if !configured.is_empty() {
         return Some(ResolvedCommand {
             source:   CommandSource::Config,
-            template: configured.to_string(),
+            template: normalize_command_template(configured),
         });
     }
 
@@ -105,7 +106,11 @@ pub fn infer_command() -> Option<String> {
     let model_dir = resolved_model_dir()?;
     let python_bin = inferred_python_bin(&script);
 
-    Some(build_command_template(&python_bin, &script, &model_dir))
+    Some(normalize_command_template(&build_command_template(
+        &python_bin,
+        &script,
+        &model_dir,
+    )))
 }
 
 pub fn bootstrap_managed_install() -> Result<String> {
@@ -129,7 +134,9 @@ pub fn bootstrap_managed_install() -> Result<String> {
         .build()
     })?;
 
-    Ok(build_command_template(&python, &script, &model_dir))
+    Ok(normalize_command_template(&build_command_template(
+        &python, &script, &model_dir,
+    )))
 }
 
 pub fn expand_command(template: &str, host: &str, port: u16, url: &str) -> String {
@@ -214,11 +221,11 @@ pub async fn ensure_running(cfg: &CosyvoiceConfig) -> Result<()> {
 }
 
 async fn start_and_wait(base_url: &str, command_template: &str) -> Result<()> {
-    start_runtime(base_url, command_template)?;
-    wait_for_ready(base_url, Duration::from_secs(90)).await
+    let mut child = start_runtime(base_url, command_template)?;
+    wait_for_ready(base_url, startup_timeout(), Some(&mut child)).await
 }
 
-fn start_runtime(base_url: &str, command_template: &str) -> Result<()> {
+fn start_runtime(base_url: &str, command_template: &str) -> Result<Child> {
     let (host, port) = parse_bind_addr(base_url)?;
     let command_line = expand_command(command_template, &host, port, base_url);
     let log_path = crate::paths::cosyvoice_log_file();
@@ -246,7 +253,7 @@ fn start_runtime(base_url: &str, command_template: &str) -> Result<()> {
         c
     };
 
-    command
+    let child = command
         .stdout(Stdio::from(stdout_log))
         .stderr(Stdio::from(stderr_log))
         .spawn()
@@ -257,14 +264,30 @@ fn start_runtime(base_url: &str, command_template: &str) -> Result<()> {
         log_path.display()
     );
 
-    Ok(())
+    Ok(child)
 }
 
-async fn wait_for_ready(base_url: &str, timeout: Duration) -> Result<()> {
+async fn wait_for_ready(
+    base_url: &str,
+    timeout: Duration,
+    mut child: Option<&mut Child>,
+) -> Result<()> {
     let deadline = std::time::Instant::now() + timeout;
     while std::time::Instant::now() < deadline {
         if is_api_ready(base_url).await {
             return Ok(());
+        }
+
+        if let Some(proc) = child.as_deref_mut()
+            && let Some(status) = proc.try_wait().context(error::IoSnafu)?
+        {
+            return error::CosyvoiceSnafu {
+                message: format!(
+                    "CosyVoice runtime exited early with status {status}; see logs: {}",
+                    crate::paths::cosyvoice_log_file().display()
+                ),
+            }
+            .fail();
         }
         tokio::time::sleep(Duration::from_millis(500)).await;
     }
@@ -367,6 +390,7 @@ fn ensure_managed_python_env(repo_dir: &Path) -> Result<String> {
         }
         .build()
     })?;
+    ensure_pip_available(&python)?;
 
     let requirements = repo_dir.join("requirements.txt");
     ensure!(
@@ -381,7 +405,7 @@ fn ensure_managed_python_env(repo_dir: &Path) -> Result<String> {
 
     let stamp = crate::paths::cosyvoice_requirements_stamp();
     if !stamp.is_file() {
-        run_checked(
+        if let Err(err) = run_checked(
             Command::new(&python)
                 .arg("-m")
                 .arg("pip")
@@ -389,17 +413,11 @@ fn ensure_managed_python_env(repo_dir: &Path) -> Result<String> {
                 .arg("--upgrade")
                 .arg("pip"),
             "upgrade pip for CosyVoice venv",
-        )?;
+        ) {
+            eprintln!("  warning: {err}");
+        }
 
-        run_checked(
-            Command::new(&python)
-                .arg("-m")
-                .arg("pip")
-                .arg("install")
-                .arg("-r")
-                .arg(&requirements),
-            "install CosyVoice runtime dependencies",
-        )?;
+        install_requirements_with_fallback(&python, &requirements)?;
 
         if let Some(parent) = stamp.parent() {
             std::fs::create_dir_all(parent).context(error::IoSnafu)?;
@@ -482,11 +500,161 @@ fn resolved_model_dir() -> Option<String> {
 
 fn build_command_template(python_bin: &str, server_script: &Path, model_dir: &str) -> String {
     format!(
-        "{} {} --host {HOST_TOKEN} --port {PORT_TOKEN} --model_dir {}",
+        "{} {} --port {PORT_TOKEN} --model_dir {}",
         shell_quote(python_bin),
         shell_quote(server_script.to_string_lossy().as_ref()),
         shell_quote(model_dir),
     )
+}
+
+fn normalize_command_template(template: &str) -> String {
+    let trimmed = template.trim();
+    if !trimmed.contains("runtime/python/fastapi/server.py") {
+        return trimmed.to_string();
+    }
+
+    let mut migrated = trimmed.replace("--host {host} --port {port}", "--port {port}");
+    migrated = migrated.replace("--host {host}", "");
+    while migrated.contains("  ") {
+        migrated = migrated.replace("  ", " ");
+    }
+    migrated.trim().to_string()
+}
+
+fn startup_timeout() -> Duration {
+    let raw = std::env::var("COSYVOICE_STARTUP_TIMEOUT_SECS").ok();
+    let secs = startup_timeout_secs_from(raw.as_deref());
+    Duration::from_secs(secs)
+}
+
+fn startup_timeout_secs_from(raw: Option<&str>) -> u64 {
+    raw.and_then(|v| v.trim().parse::<u64>().ok())
+        .filter(|secs| *secs > 0)
+        .unwrap_or(DEFAULT_STARTUP_TIMEOUT_SECS)
+}
+
+#[cfg(test)]
+fn startup_timeout_from(raw: Option<&str>) -> Duration {
+    let secs = startup_timeout_secs_from(raw);
+    Duration::from_secs(secs)
+}
+
+fn ensure_pip_available(python: &Path) -> Result<()> {
+    let has_pip = Command::new(python)
+        .arg("-m")
+        .arg("pip")
+        .arg("--version")
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status()
+        .is_ok_and(|status| status.success());
+    if has_pip {
+        return Ok(());
+    }
+
+    run_checked(
+        Command::new(python)
+            .arg("-m")
+            .arg("ensurepip")
+            .arg("--upgrade"),
+        "bootstrap pip for CosyVoice venv",
+    )?;
+
+    let has_pip_after = Command::new(python)
+        .arg("-m")
+        .arg("pip")
+        .arg("--version")
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status()
+        .is_ok_and(|status| status.success());
+    ensure!(
+        has_pip_after,
+        error::CosyvoiceSnafu {
+            message: format!(
+                "pip is unavailable in CosyVoice venv ({})",
+                python.display()
+            ),
+        }
+    );
+
+    Ok(())
+}
+
+fn install_requirements_with_fallback(python: &Path, requirements: &Path) -> Result<()> {
+    let install_all = run_checked(
+        Command::new(python)
+            .arg("-m")
+            .arg("pip")
+            .arg("install")
+            .arg("-r")
+            .arg(requirements),
+        "install CosyVoice runtime dependencies",
+    );
+    if install_all.is_ok() {
+        return Ok(());
+    }
+
+    let content = std::fs::read_to_string(requirements).context(error::IoSnafu)?;
+    let whisper_spec = content.lines().find_map(|line| {
+        let trimmed = line.trim();
+        if trimmed.starts_with("openai-whisper") {
+            Some(
+                trimmed
+                    .split(';')
+                    .next()
+                    .unwrap_or(trimmed)
+                    .trim()
+                    .to_string(),
+            )
+        } else {
+            None
+        }
+    });
+    let Some(whisper_spec) = whisper_spec else {
+        return install_all;
+    };
+
+    eprintln!("  pip install -r requirements failed; retrying with dedicated whisper fallback...");
+    let filtered = content
+        .lines()
+        .filter(|line| !line.trim().starts_with("openai-whisper"))
+        .collect::<Vec<_>>()
+        .join("\n");
+
+    let nonce = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_nanos())
+        .unwrap_or_default();
+    let temp_req = std::env::temp_dir().join(format!(
+        "kotoba-cosyvoice-requirements-{}-{nonce}.txt",
+        std::process::id()
+    ));
+    std::fs::write(&temp_req, filtered).context(error::IoSnafu)?;
+
+    let retry = (|| -> Result<()> {
+        run_checked(
+            Command::new(python)
+                .arg("-m")
+                .arg("pip")
+                .arg("install")
+                .arg("-r")
+                .arg(&temp_req),
+            "install CosyVoice dependencies (without openai-whisper)",
+        )?;
+        run_checked(
+            Command::new(python)
+                .arg("-m")
+                .arg("pip")
+                .arg("install")
+                .arg(&whisper_spec)
+                .arg("--no-build-isolation"),
+            "install openai-whisper with no-build-isolation",
+        )
+    })();
+
+    let _ = std::fs::remove_file(&temp_req);
+    retry
 }
 
 fn run_checked(command: &mut Command, label: &str) -> Result<()> {
@@ -554,5 +722,23 @@ mod tests {
         let (host, port) = parse_bind_addr("http://127.0.0.1:50000").expect("parse url");
         assert_eq!(host, "127.0.0.1");
         assert_eq!(port, 50000);
+    }
+
+    #[test]
+    fn normalize_command_template_migrates_legacy_host_arg() {
+        let legacy = "'python3' '/tmp/CosyVoice/runtime/python/fastapi/server.py' --host {host} \
+                      --port {port} --model_dir 'iic/CosyVoice2-0.5B'";
+        let normalized = normalize_command_template(legacy);
+        assert!(!normalized.contains("--host {host}"));
+        assert!(normalized.contains("--port {port}"));
+    }
+
+    #[test]
+    fn startup_timeout_reads_env_override() {
+        assert_eq!(startup_timeout_from(Some("123")), Duration::from_secs(123));
+        assert_eq!(
+            startup_timeout_from(Some("invalid")),
+            Duration::from_secs(DEFAULT_STARTUP_TIMEOUT_SECS)
+        );
     }
 }
