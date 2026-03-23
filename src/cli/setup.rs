@@ -27,13 +27,18 @@ const DEFAULT_SETUP_VOICE_SPEED: f64 = 0.90;
 
 /// Result of running the setup command.
 #[derive(Debug, Serialize)]
+#[allow(clippy::struct_excessive_bools)]
 pub struct SetupResult {
     /// Path to the database file.
-    pub db_path:            String,
+    pub db_path:              String,
     /// Whether VOICEVOX Engine is installed after setup.
-    pub voicevox_installed: bool,
+    pub voicevox_installed:   bool,
     /// Whether VOICEVOX API is reachable after setup.
-    pub voicevox_running:   bool,
+    pub voicevox_running:     bool,
+    /// Whether `CosyVoice` runtime command was auto-detected and saved.
+    pub cosyvoice_configured: bool,
+    /// Whether `CosyVoice` API is reachable after setup.
+    pub cosyvoice_running:    bool,
 }
 
 fn voicevox_download_url(version: &str) -> String {
@@ -86,6 +91,16 @@ pub async fn run(db: &Database) -> Result<SetupResult> {
     let rvc_result = crate::cli::huggingface::add(DEFAULT_SETUP_RVC_SPEC).await?;
 
     let mut updated = app_config::load().clone();
+    let mut cosyvoice_configured = false;
+    if updated.cosyvoice.command.trim().is_empty()
+        && std::env::var("COSYVOICE_CMD").is_err()
+        && let Some(inferred) = crate::cosyvoice_runtime::infer_command()
+    {
+        updated.cosyvoice.command = inferred;
+        cosyvoice_configured = true;
+        eprintln!("  auto-detected CosyVoice runtime command");
+    }
+
     apply_default_voice_preset(&mut updated, &rvc_result.model);
     app_config::save(&updated).context(error::IoSnafu)?;
     eprintln!(
@@ -95,12 +110,32 @@ pub async fn run(db: &Database) -> Result<SetupResult> {
 
     ensure_voicevox_running(&voicevox_url).await?;
 
+    let cosyvoice_running = if crate::cosyvoice_runtime::is_api_ready(
+        &crate::cosyvoice_runtime::base_url(&updated.cosyvoice),
+    )
+    .await
+    {
+        true
+    } else if updated.cosyvoice.autostart {
+        match crate::cosyvoice_runtime::ensure_running(&updated.cosyvoice).await {
+            Ok(()) => true,
+            Err(err) => {
+                eprintln!("  cosyvoice runtime not ready: {err}");
+                false
+            }
+        }
+    } else {
+        false
+    };
+
     eprintln!("setup complete!");
 
     Ok(SetupResult {
-        db_path:            db.path().display().to_string(),
+        db_path: db.path().display().to_string(),
         voicevox_installed: is_voicevox_installed(),
-        voicevox_running:   is_voicevox_api_ready(&voicevox_url).await,
+        voicevox_running: is_voicevox_api_ready(&voicevox_url).await,
+        cosyvoice_configured,
+        cosyvoice_running,
     })
 }
 

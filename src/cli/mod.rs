@@ -177,7 +177,8 @@ pub enum Command {
     },
 
     // ── System ───────────────────────────────────────────────
-    /// Download VOICEVOX, initialize DB, and set default Kokoro+RVC voice
+    /// Download VOICEVOX, initialize DB, set default Kokoro+RVC voice, and
+    /// auto-detect/start `CosyVoice` runtime when available
     Setup,
     /// Check all dependencies (DB, VOICEVOX, models, disk space)
     Doctor {

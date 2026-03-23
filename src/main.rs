@@ -1,5 +1,6 @@
 mod app_config;
 mod cli;
+mod cosyvoice_runtime;
 mod db;
 mod error;
 mod http;
@@ -170,7 +171,9 @@ async fn run() -> std::result::Result<(), Box<dyn std::error::Error>> {
                     "action": "setup",
                     "db_path": result.db_path,
                     "voicevox_installed": result.voicevox_installed,
-                    "voicevox_running": result.voicevox_running
+                    "voicevox_running": result.voicevox_running,
+                    "cosyvoice_configured": result.cosyvoice_configured,
+                    "cosyvoice_running": result.cosyvoice_running
                 })
             );
         }

@@ -188,13 +188,19 @@ kotoba config set cosyvoice.url http://127.0.0.1:50000
 # 2) 允许自动拉起（默认就是 true）
 kotoba config set cosyvoice.autostart true
 
-# 3) 配置启动命令（只需一次，支持 {port}/{host}/{url} 占位符）
-kotoba config set cosyvoice.command "python3 /path/to/CosyVoice/runtime/python/fastapi/server.py --port {port} --model_dir iic/CosyVoice2-0.5B"
+# 3) 运行 setup（会尝试自动探测并启动 CosyVoice）
+kotoba setup
 
 # 4) 用 sft 模式最简单
 kotoba config set cosyvoice.mode sft
 kotoba voice set cosyvoice:中文女
 kotoba play こんにちは --enable
+```
+
+如果你的 CosyVoice 不在默认探测路径，再手动补这一条：
+
+```bash
+kotoba config set cosyvoice.command "python3 /path/to/CosyVoice/runtime/python/fastapi/server.py --port {port} --model_dir iic/CosyVoice2-0.5B"
 ```
 
 零样本克隆常用配置：
