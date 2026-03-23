@@ -67,6 +67,11 @@ pub enum KotobaError {
          rvc:{repo_id}:{subpath}"
     ))]
     RvcModelNotFound { repo_id: String, subpath: String },
+
+    #[snafu(display(
+        "auto-fill failed for word '{word}': {message} — pass reading and meaning manually"
+    ))]
+    WordLookup { word: String, message: String },
 }
 
 pub type Result<T> = std::result::Result<T, KotobaError>;

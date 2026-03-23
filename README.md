@@ -16,7 +16,7 @@ git clone https://github.com/rararulab/kotoba && cd kotoba && cargo install --pa
 
 ```bash
 kotoba setup                             # Download VOICEVOX, init DB, configure env
-kotoba add 成功 せいこう success --level N5 # Add vocabulary
+kotoba add 成功 --level n5               # Add vocabulary (auto-fill reading + meaning)
 kotoba review                            # Show due reviews
 kotoba seen 成功 recalled                 # Record review (forgot/recognized/recalled)
 kotoba play 成功                          # Pronounce with TTS
@@ -30,6 +30,7 @@ kotoba play 成功                          # Pronounce with TTS
 kotoba init                              # Initialize database (without full setup)
 kotoba status                            # Current level, vocab count, due reviews
 kotoba add 成功 せいこう success --level N5 # Add vocabulary
+kotoba add 協力 --level n5               # Add with auto-filled reading + meaning
 kotoba seen 成功 recalled                 # Record review (forgot/recognized/recalled)
 kotoba review                            # Due vocabulary list (JSON)
 kotoba progress                          # Learning statistics

@@ -63,6 +63,25 @@ async fn run() -> std::result::Result<(), Box<dyn std::error::Error>> {
             meaning,
             level,
         } => {
+            let (reading, meaning) = match (reading, meaning) {
+                (Some(reading), Some(meaning)) => (reading, meaning),
+                (None, None) => {
+                    let auto = cli::dictionary::lookup(&word).await?;
+                    eprintln!(
+                        "auto-filled from dictionary: {word}({}) = {}",
+                        auto.reading, auto.meaning
+                    );
+                    (auto.reading, auto.meaning)
+                }
+                _ => {
+                    return Err(Box::new(error::KotobaError::WordLookup {
+                        word:    word.clone(),
+                        message: "provide both <reading> and <meaning>, or omit both for auto-fill"
+                            .to_string(),
+                    }));
+                }
+            };
+
             let level_str = level.to_string();
             db.add_vocabulary(&word, &reading, &meaning, &level_str)
                 .await?;
