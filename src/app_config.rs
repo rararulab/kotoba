@@ -11,13 +11,11 @@ static APP_CONFIG: OnceLock<AppConfig> = OnceLock::new();
 #[serde(default)]
 pub struct AppConfig {
     /// Voice backend configuration.
-    pub voice:     VoiceConfig,
+    pub voice:    VoiceConfig,
     /// VOICEVOX-specific configuration.
-    pub voicevox:  VoicevoxConfig,
-    /// CosyVoice-specific configuration.
-    pub cosyvoice: CosyvoiceConfig,
+    pub voicevox: VoicevoxConfig,
     /// RVC voice conversion configuration.
-    pub rvc:       RvcConfig,
+    pub rvc:      RvcConfig,
 }
 
 /// Voice backend configuration.
@@ -40,28 +38,6 @@ pub struct VoicevoxConfig {
     pub url:     String,
     /// Default speaker ID.
     pub speaker: String,
-}
-
-/// CosyVoice-specific configuration.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(default)]
-pub struct CosyvoiceConfig {
-    /// API base URL.
-    pub url:           String,
-    /// Automatically start runtime when URL is unreachable.
-    pub autostart:     bool,
-    /// Command template used to launch runtime.
-    ///
-    /// Supports placeholders: `{host}`, `{port}`, `{url}`.
-    pub command:       String,
-    /// Inference mode (`sft`, `zero_shot`, `cross_lingual`, `instruct`).
-    pub mode:          String,
-    /// Prompt text for `zero_shot` mode.
-    pub prompt_text:   String,
-    /// Prompt wav path for `zero_shot` / `cross_lingual` mode.
-    pub prompt_wav:    String,
-    /// Instruction text for instruct mode.
-    pub instruct_text: String,
 }
 
 /// RVC voice conversion configuration.
@@ -96,20 +72,6 @@ impl Default for VoicevoxConfig {
             version: "0.22.2".to_string(),
             url:     "http://localhost:50021".to_string(),
             speaker: "1".to_string(),
-        }
-    }
-}
-
-impl Default for CosyvoiceConfig {
-    fn default() -> Self {
-        Self {
-            url:           "http://127.0.0.1:50000".to_string(),
-            autostart:     true,
-            command:       String::new(),
-            mode:          "sft".to_string(),
-            prompt_text:   String::new(),
-            prompt_wav:    String::new(),
-            instruct_text: String::new(),
         }
     }
 }

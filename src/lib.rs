@@ -1,7 +1,6 @@
 //! Kotoba library — re-exports modules for integration test access.
 
 pub mod app_config;
-pub mod cosyvoice_runtime;
 pub mod db;
 pub mod error;
 pub mod http;

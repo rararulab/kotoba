@@ -189,17 +189,6 @@ pub fn list() -> Result<()> {
         });
     }
 
-    let cosyvoice_speaker = current
-        .strip_prefix("cosyvoice:")
-        .filter(|speaker| !speaker.trim().is_empty())
-        .unwrap_or("default");
-    let cosyvoice_key = format!("cosyvoice:{cosyvoice_speaker}");
-    voices.push(VoiceInfo {
-        name:    format!("CosyVoice {cosyvoice_speaker} [{cosyvoice_key}]"),
-        backend: "cosyvoice".to_string(),
-        active:  current == cosyvoice_key,
-    });
-
     // Downloaded HuggingFace models
     let models_path = crate::paths::models_dir();
     std::fs::create_dir_all(&models_path).context(error::IoSnafu)?;
