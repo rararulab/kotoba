@@ -1,5 +1,6 @@
 //! CLI command definitions and subcommand modules.
 
+pub mod dictionary;
 pub mod doctor;
 pub mod export;
 pub mod huggingface;
@@ -77,10 +78,12 @@ pub enum Command {
     Add {
         /// The word (kanji or kana)
         word:    String,
-        /// Kana reading
-        reading: String,
-        /// Meaning
-        meaning: String,
+        /// Kana reading (optional; auto-filled when both reading and meaning
+        /// are omitted)
+        reading: Option<String>,
+        /// Meaning (optional; auto-filled when both reading and meaning are
+        /// omitted)
+        meaning: Option<String>,
         /// JLPT level
         #[arg(long, short = 'l', default_value = "n5")]
         level:   JlptLevel,
@@ -236,4 +239,40 @@ pub enum HuggingFaceAction {
     },
     /// List downloaded HuggingFace models
     List,
+}
+
+#[cfg(test)]
+mod tests {
+    use clap::Parser;
+
+    use super::*;
+
+    #[test]
+    fn add_command_accepts_word_only() {
+        let cli = Cli::try_parse_from(["kotoba", "add", "成功"]).expect("parse should succeed");
+        let Command::Add {
+            reading, meaning, ..
+        } = cli.command
+        else {
+            panic!("expected add command");
+        };
+
+        assert!(reading.is_none());
+        assert!(meaning.is_none());
+    }
+
+    #[test]
+    fn add_command_accepts_manual_fields() {
+        let cli = Cli::try_parse_from(["kotoba", "add", "成功", "せいこう", "success"])
+            .expect("parse should succeed");
+        let Command::Add {
+            reading, meaning, ..
+        } = cli.command
+        else {
+            panic!("expected add command");
+        };
+
+        assert_eq!(reading.as_deref(), Some("せいこう"));
+        assert_eq!(meaning.as_deref(), Some("success"));
+    }
 }
