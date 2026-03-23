@@ -14,6 +14,8 @@ pub struct AppConfig {
     pub voice:    VoiceConfig,
     /// VOICEVOX-specific configuration.
     pub voicevox: VoicevoxConfig,
+    /// RVC voice conversion configuration.
+    pub rvc:      RvcConfig,
 }
 
 /// Voice backend configuration.
@@ -34,6 +36,14 @@ pub struct VoicevoxConfig {
     pub url:     String,
     /// Default speaker ID.
     pub speaker: String,
+}
+
+/// RVC voice conversion configuration.
+#[derive(Debug, Default, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct RvcConfig {
+    /// Path to Python executable with RVC dependencies installed.
+    pub python: String,
 }
 
 impl Default for VoiceConfig {

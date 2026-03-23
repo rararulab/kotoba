@@ -36,3 +36,6 @@ pub fn audio_cache_dir() -> PathBuf { data_dir().join("audio") }
 
 /// Config file path: `<data>/config.toml`
 pub fn config_file() -> PathBuf { data_dir().join("config.toml") }
+
+/// RVC Python venv directory: `<data>/venvs/rvc`
+pub fn rvc_venv_dir() -> PathBuf { data_dir().join("venvs").join("rvc") }
