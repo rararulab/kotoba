@@ -4,10 +4,24 @@ use std::{io::Write, path::Path};
 
 use futures_util::StreamExt;
 use indicatif::{ProgressBar, ProgressStyle};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use snafu::{ResultExt, ensure};
 
 use crate::error::{self, Result};
+
+/// A single file entry returned by the `HuggingFace` model API.
+#[derive(Debug, Deserialize)]
+struct HfSibling {
+    /// Repository-relative file path (e.g. `weights/model.pth`).
+    rfilename: String,
+}
+
+/// Top-level response from `https://huggingface.co/api/models/{repo_id}`.
+#[derive(Debug, Deserialize)]
+struct HfModelInfo {
+    /// List of files in the repository.
+    siblings: Vec<HfSibling>,
+}
 
 /// Result of downloading a model.
 #[derive(Debug, Serialize)]
@@ -79,6 +93,70 @@ async fn download_file(client: &reqwest::Client, url: &str, dest: &Path) -> Resu
 
     eprintln!("  downloaded {file_size} bytes");
     Ok(file_size)
+}
+
+/// Query the `HuggingFace` API for the file listing of a repository.
+async fn query_repo_files(repo_id: &str) -> Result<Vec<HfSibling>> {
+    let client = crate::http::client();
+    let url = format!("https://huggingface.co/api/models/{repo_id}");
+    let resp = client.get(&url).send().await.context(error::HttpSnafu)?;
+
+    ensure!(
+        resp.status().is_success(),
+        error::DownloadFailedSnafu {
+            url:    url.clone(),
+            status: resp.status().to_string(),
+        }
+    );
+
+    let info: HfModelInfo = resp.json().await.context(error::HttpSnafu)?;
+    Ok(info.siblings)
+}
+
+/// Locate `.pth` and `.index` files from `HuggingFace` sibling entries.
+///
+/// When `subpath` is `Some`, only files under that prefix are considered.
+/// When `None`, all files are searched and the shallowest `.pth` is preferred
+/// (fewest path separators).
+///
+/// Returns `(pth_path, index_path)` as repository-relative strings.
+fn find_rvc_files(
+    siblings: &[HfSibling],
+    subpath: Option<&str>,
+) -> (Option<String>, Option<String>) {
+    let candidates: Vec<&str> = siblings
+        .iter()
+        .map(|s| s.rfilename.as_str())
+        .filter(|name| {
+            subpath.is_none_or(|prefix| {
+                let normalized = prefix.strip_suffix('/').unwrap_or(prefix);
+                name.starts_with(normalized) && name.as_bytes().get(normalized.len()) == Some(&b'/')
+            })
+        })
+        .collect();
+
+    // Find the shallowest .pth file (fewest '/' separators)
+    let pth = candidates
+        .iter()
+        .filter(|name| {
+            Path::new(name)
+                .extension()
+                .is_some_and(|ext| ext.eq_ignore_ascii_case("pth"))
+        })
+        .min_by_key(|name| name.matches('/').count())
+        .map(|s| (*s).to_string());
+
+    let index = candidates
+        .iter()
+        .filter(|name| {
+            Path::new(name)
+                .extension()
+                .is_some_and(|ext| ext.eq_ignore_ascii_case("index"))
+        })
+        .min_by_key(|name| name.matches('/').count())
+        .map(|s| (*s).to_string());
+
+    (pth, index)
 }
 
 /// List downloaded `HuggingFace` models.
@@ -160,10 +238,20 @@ async fn add_kokoro() -> Result<ModelAddResult> {
 
 /// Download an RVC voice model from `HuggingFace`.
 ///
-/// Downloads `model.pth` (required) and `model.index` (optional) into
-/// `~/.kotoba/models/rvc/{model_name}/`. Skips if `model.pth` already exists.
-async fn add_rvc(repo_id: &str) -> Result<ModelAddResult> {
-    let model_name = repo_id.split('/').next_back().unwrap_or(repo_id);
+/// Accepts `owner/repo` or `owner/repo:subpath` syntax. Queries the HF API to
+/// discover `.pth` and `.index` files, then downloads them as `model.pth` /
+/// `model.index` into `~/.kotoba/models/rvc/{model_name}/`.
+async fn add_rvc(input: &str) -> Result<ModelAddResult> {
+    // Parse optional subpath: "owner/repo:subpath" or just "owner/repo"
+    let (repo_id, subpath) = match input.find(':') {
+        // Only split on ':' that appears after 'owner/repo' (i.e. after a '/')
+        Some(pos) if input[..pos].contains('/') => (&input[..pos], Some(&input[pos + 1..])),
+        _ => (input, None),
+    };
+
+    let model_name = subpath
+        .and_then(|s| s.rsplit('/').next())
+        .unwrap_or_else(|| repo_id.split('/').next_back().unwrap_or(repo_id));
     let model_dir = crate::paths::models_dir().join("rvc").join(model_name);
     let pth_path = model_dir.join("model.pth");
 
@@ -175,26 +263,36 @@ async fn add_rvc(repo_id: &str) -> Result<ModelAddResult> {
         });
     }
 
+    eprintln!("querying huggingface for rvc model files: {repo_id}...");
+    let siblings = query_repo_files(repo_id).await?;
+    let (pth_file, index_file) = find_rvc_files(&siblings, subpath);
+
+    let pth_file = pth_file.ok_or_else(|| {
+        error::RvcModelNotFoundSnafu {
+            repo_id: repo_id.to_string(),
+            subpath: subpath.unwrap_or("subpath").to_string(),
+        }
+        .build()
+    })?;
+
     std::fs::create_dir_all(&model_dir).context(error::IoSnafu)?;
 
-    let client = crate::http::client();
-    let pth_url = format!("https://huggingface.co/{repo_id}/resolve/main/model.pth");
+    let client = crate::http::download_client();
+    let pth_url = format!("https://huggingface.co/{repo_id}/resolve/main/{pth_file}");
 
-    eprintln!("downloading rvc model from huggingface: {repo_id}...");
-
+    eprintln!("downloading rvc model: {pth_file}...");
     if let Err(e) = download_file(client, &pth_url, &pth_path).await {
-        // Clean up empty directory on failure
         let _ = std::fs::remove_dir_all(&model_dir);
         return Err(e);
     }
 
-    // Try to download model.index if available (optional for RVC)
-    let index_url = format!("https://huggingface.co/{repo_id}/resolve/main/model.index");
-    if let Ok(resp) = client.get(&index_url).send().await
-        && resp.status().is_success()
-        && let Ok(index_bytes) = resp.bytes().await
-    {
-        let _ = std::fs::write(model_dir.join("model.index"), &index_bytes);
+    // Download .index file if discovered (optional for RVC)
+    if let Some(index_file) = &index_file {
+        let index_url = format!("https://huggingface.co/{repo_id}/resolve/main/{index_file}");
+        let index_dest = model_dir.join("model.index");
+        eprintln!("downloading rvc index: {index_file}...");
+        // Index is optional — don't fail the whole operation if it errors
+        let _ = download_file(client, &index_url, &index_dest).await;
     }
 
     eprintln!("rvc model saved to: {}", model_dir.display());
@@ -263,29 +361,89 @@ pub async fn add(repo_id: &str) -> Result<ModelAddResult> {
 
 #[cfg(test)]
 mod tests {
-    #[test]
-    fn rvc_model_path_uses_last_segment() {
-        let repo_id = "someone/naruto-rvc-v2";
-        let model_name = repo_id.split('/').next_back().unwrap_or(repo_id);
-        let model_dir = crate::paths::models_dir().join("rvc").join(model_name);
+    use super::*;
 
-        assert_eq!(model_name, "naruto-rvc-v2");
-        assert!(model_dir.ends_with("models/rvc/naruto-rvc-v2"));
+    /// Helper to build a vec of `HfSibling` from string slices.
+    fn siblings(names: &[&str]) -> Vec<HfSibling> {
+        names
+            .iter()
+            .map(|n| HfSibling {
+                rfilename: (*n).to_string(),
+            })
+            .collect()
     }
 
     #[test]
-    fn rvc_model_path_handles_bare_name() {
-        let repo_id = "my-model";
-        let model_name = repo_id.split('/').next_back().unwrap_or(repo_id);
-
-        assert_eq!(model_name, "my-model");
+    fn find_pth_in_weights_dir() {
+        let sibs = siblings(&["README.md", "weights/model.pth", "weights/model.index"]);
+        let (pth, idx) = find_rvc_files(&sibs, None);
+        assert_eq!(pth.as_deref(), Some("weights/model.pth"));
+        assert_eq!(idx.as_deref(), Some("weights/model.index"));
     }
 
     #[test]
-    fn add_dispatches_rvc_prefix() {
-        let input = "rvc:someone/naruto-rvc-v2";
-        let stripped = input.strip_prefix("rvc:");
+    fn find_pth_with_subpath_filter() {
+        let sibs = siblings(&[
+            "models/A/modelA.pth",
+            "models/A/modelA.index",
+            "models/B/modelB.pth",
+            "models/B/modelB.index",
+        ]);
+        let (pth, idx) = find_rvc_files(&sibs, Some("models/A"));
+        assert_eq!(pth.as_deref(), Some("models/A/modelA.pth"));
+        assert_eq!(idx.as_deref(), Some("models/A/modelA.index"));
+    }
 
-        assert_eq!(stripped, Some("someone/naruto-rvc-v2"));
+    #[test]
+    fn find_pth_at_root() {
+        let sibs = siblings(&["README.md", "voice.pth", "config.json"]);
+        let (pth, idx) = find_rvc_files(&sibs, None);
+        assert_eq!(pth.as_deref(), Some("voice.pth"));
+        assert_eq!(idx, None);
+    }
+
+    #[test]
+    fn returns_none_when_no_pth_found() {
+        let sibs = siblings(&["README.md", "config.json", "data.bin"]);
+        let (pth, idx) = find_rvc_files(&sibs, None);
+        assert_eq!(pth, None);
+        assert_eq!(idx, None);
+    }
+
+    #[test]
+    fn prefers_shallowest_pth() {
+        let sibs = siblings(&["deep/nested/dir/model.pth", "shallow/model.pth", "root.pth"]);
+        let (pth, _) = find_rvc_files(&sibs, None);
+        assert_eq!(pth.as_deref(), Some("root.pth"));
+    }
+
+    #[test]
+    fn subpath_does_not_match_prefix_overlap() {
+        // "models/AB/x.pth" should NOT match subpath "models/A"
+        let sibs = siblings(&["models/AB/x.pth", "models/A/y.pth"]);
+        let (pth, _) = find_rvc_files(&sibs, Some("models/A"));
+        assert_eq!(pth.as_deref(), Some("models/A/y.pth"));
+    }
+
+    #[test]
+    fn parse_rvc_input_without_subpath() {
+        let input = "someone/naruto-rvc-v2";
+        let (repo_id, subpath) = match input.find(':') {
+            Some(pos) if input[..pos].contains('/') => (&input[..pos], Some(&input[pos + 1..])),
+            _ => (input, None),
+        };
+        assert_eq!(repo_id, "someone/naruto-rvc-v2");
+        assert_eq!(subpath, None);
+    }
+
+    #[test]
+    fn parse_rvc_input_with_subpath() {
+        let input = "ttttdiva/rvc_okiba:models/miku";
+        let (repo_id, subpath) = match input.find(':') {
+            Some(pos) if input[..pos].contains('/') => (&input[..pos], Some(&input[pos + 1..])),
+            _ => (input, None),
+        };
+        assert_eq!(repo_id, "ttttdiva/rvc_okiba");
+        assert_eq!(subpath, Some("models/miku"));
     }
 }

@@ -61,6 +61,12 @@ pub enum KotobaError {
 
     #[snafu(display("download failed for {url}: HTTP {status}"))]
     DownloadFailed { url: String, status: String },
+
+    #[snafu(display(
+        "no .pth model found in repo {repo_id} — try specifying a subpath with \
+         rvc:{repo_id}:{subpath}"
+    ))]
+    RvcModelNotFound { repo_id: String, subpath: String },
 }
 
 pub type Result<T> = std::result::Result<T, KotobaError>;
