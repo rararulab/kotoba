@@ -8,13 +8,17 @@ Immersive Japanese language learning CLI — Rust + SQLite, SRS-powered vocabula
 git clone https://github.com/rararulab/kotoba && cd kotoba && cargo install --path .
 ```
 
+## Documentation
+
+- Chinese quick guide: [docs/usage.zh-CN.md](docs/usage.zh-CN.md)
+
 ## Quick Start
 
 ```bash
 kotoba setup                             # Download VOICEVOX, init DB, configure env
 kotoba add 成功 せいこう success --level N5 # Add vocabulary
 kotoba review                            # Show due reviews
-kotoba seen 成功 5                        # Record review (quality: 1/3/5)
+kotoba seen 成功 recalled                 # Record review (forgot/recognized/recalled)
 kotoba play 成功                          # Pronounce with TTS
 ```
 
@@ -26,7 +30,7 @@ kotoba play 成功                          # Pronounce with TTS
 kotoba init                              # Initialize database (without full setup)
 kotoba status                            # Current level, vocab count, due reviews
 kotoba add 成功 せいこう success --level N5 # Add vocabulary
-kotoba seen 成功 5                        # Record review (quality: 1/3/5)
+kotoba seen 成功 recalled                 # Record review (forgot/recognized/recalled)
 kotoba review                            # Due vocabulary list (JSON)
 kotoba progress                          # Learning statistics
 kotoba list vocab                        # List all vocabulary
@@ -39,7 +43,7 @@ kotoba export json                       # Export vocabulary (json/csv/anki)
 kotoba grammar add ～ている "ongoing action" --level N5
 kotoba grammar list
 kotoba review --grammar                  # Due grammar reviews
-kotoba seen --grammar ～ている 5          # Record grammar review
+kotoba seen --grammar ～ている recognized # Record grammar review
 ```
 
 ### Voice & TTS
