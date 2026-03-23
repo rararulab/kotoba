@@ -34,6 +34,14 @@ pub fn models_dir() -> PathBuf { data_dir().join("models") }
 /// `CosyVoice` runtime directory: `<data>/cosyvoice`
 pub fn cosyvoice_dir() -> PathBuf { data_dir().join("cosyvoice") }
 
+/// `CosyVoice` prompt directory: `<data>/cosyvoice/prompts`
+pub fn cosyvoice_prompts_dir() -> PathBuf { cosyvoice_dir().join("prompts") }
+
+/// Profile-specific prompt directory: `<data>/cosyvoice/prompts/<profile>`
+pub fn cosyvoice_prompt_profile_dir(profile: &str) -> PathBuf {
+    cosyvoice_prompts_dir().join(profile)
+}
+
 /// `CosyVoice` runtime log file: `<data>/cosyvoice/runtime.log`
 pub fn cosyvoice_log_file() -> PathBuf { cosyvoice_dir().join("runtime.log") }
 

@@ -248,6 +248,37 @@ pub enum VoiceAction {
         /// Voice name or ID
         name: String,
     },
+    /// Build a `CosyVoice` zero-shot clone profile from an online source
+    /// (yt-dlp
+    /// + ffmpeg)
+    Clone {
+        /// Source URL (YouTube/Bilibili/etc. supported by yt-dlp)
+        source_url:         String,
+        /// Local profile name under `~/.kotoba/cosyvoice/prompts/`
+        #[arg(long, default_value = "to_love_ru_rara")]
+        profile:            String,
+        /// Speaker ID used by voice.active (e.g. clone)
+        #[arg(long, default_value = "clone")]
+        speaker:            String,
+        /// Start offset passed to ffmpeg `-ss` (seconds or HH:MM:SS)
+        #[arg(long, default_value = "0")]
+        start:              String,
+        /// Clip length (seconds) passed to ffmpeg `-t`
+        #[arg(long, default_value_t = 12)]
+        duration_sec:       u32,
+        /// Reference transcript that matches the clipped prompt audio
+        #[arg(long, default_value = "Please imitate this speaker's voice style.")]
+        prompt_text:        String,
+        /// Sentence used to verify clone synthesis immediately after setup
+        #[arg(
+            long,
+            default_value = "This is a backend verification sentence for cloned voice."
+        )]
+        verification_text:  String,
+        /// Skip runtime startup/synthesis verification (only write config)
+        #[arg(long, default_value_t = false)]
+        skip_runtime_check: bool,
+    },
     /// Manage voice tone presets (prosody and RVC tuning)
     Tone {
         #[command(subcommand)]
@@ -404,6 +435,55 @@ mod tests {
         };
 
         assert_eq!(name, "miku");
+    }
+
+    #[test]
+    fn voice_clone_command_parses() {
+        let cli = Cli::try_parse_from([
+            "kotoba",
+            "voice",
+            "clone",
+            "https://youtube.com/watch?v=dQw4w9WgXcQ",
+            "--profile",
+            "to_love_ru_rara",
+            "--speaker",
+            "clone",
+            "--start",
+            "12.5",
+            "--duration-sec",
+            "10",
+            "--prompt-text",
+            "hello",
+            "--verification-text",
+            "test",
+        ])
+        .expect("parse should succeed");
+
+        let Command::Voice { action } = cli.command else {
+            panic!("expected voice command");
+        };
+        let VoiceAction::Clone {
+            source_url,
+            profile,
+            speaker,
+            start,
+            duration_sec,
+            prompt_text,
+            verification_text,
+            skip_runtime_check,
+        } = action
+        else {
+            panic!("expected voice clone command");
+        };
+
+        assert_eq!(source_url, "https://youtube.com/watch?v=dQw4w9WgXcQ");
+        assert_eq!(profile, "to_love_ru_rara");
+        assert_eq!(speaker, "clone");
+        assert_eq!(start, "12.5");
+        assert_eq!(duration_sec, 10);
+        assert_eq!(prompt_text, "hello");
+        assert_eq!(verification_text, "test");
+        assert!(!skip_runtime_check);
     }
 
     #[test]

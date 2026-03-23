@@ -198,6 +198,24 @@ kotoba voice set cosyvoice:中文女
 kotoba play こんにちは --enable
 ```
 
+如果要直接做「下载音源 + 克隆 + 切换 backend」一条命令：
+
+```bash
+kotoba voice clone "https://www.youtube.com/watch?v=..." \
+  --profile to_love_ru_rara \
+  --speaker clone \
+  --start 18 \
+  --duration-sec 12 \
+  --prompt-text "ごめんね、ちょっとびっくりしちゃった。"
+```
+
+这条命令会自动执行：
+- `yt-dlp` 下载音频
+- `ffmpeg` 截取并生成 `prompt.wav`
+- 写入 `cosyvoice.mode=zero_shot`、`cosyvoice.prompt_wav`、`cosyvoice.prompt_text`
+- 切到 `voice.active=cosyvoice:clone`
+- 立即拉起 CosyVoice 并做一次合成验证（可用 `--skip-runtime-check` 关闭）
+
 如果你的 CosyVoice 不在默认探测路径，再手动补这一条：
 
 ```bash

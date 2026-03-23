@@ -64,6 +64,9 @@ kotoba voice set voicevox:3              # Use VOICEVOX speaker 3
 kotoba voice set kokoro:af_heart         # Use Kokoro ONNX (local, no server needed)
 kotoba voice set kokoro:af_heart+rvc:naruto  # Kokoro + RVC voice conversion
 kotoba voice set cosyvoice:中文女         # Use CosyVoice speaker/profile from runtime
+kotoba voice clone "https://www.youtube.com/watch?v=..." \
+  --profile to_love_ru_rara --speaker clone \
+  --prompt-text "ごめんね、ちょっとびっくりしちゃった。"
 kotoba setup                             # Also tries to auto-detect/start CosyVoice runtime
 kotoba config set cosyvoice.url http://127.0.0.1:50000
 kotoba config set cosyvoice.mode sft
@@ -108,6 +111,21 @@ Default behavior:
 kotoba config set cosyvoice.autostart true   # default=true
 kotoba setup                                 # bootstraps managed CosyVoice and starts it when possible
 ```
+
+Zero-shot clone without manual training:
+
+```bash
+kotoba voice clone "https://www.youtube.com/watch?v=..." \
+  --profile to_love_ru_rara \
+  --speaker clone \
+  --start 18 \
+  --duration-sec 12 \
+  --prompt-text "ごめんね、ちょっとびっくりしちゃった。"
+```
+
+This command runs `yt-dlp` + `ffmpeg`, writes `cosyvoice.mode=zero_shot`,
+stores `cosyvoice.prompt_wav` and `cosyvoice.prompt_text`, switches
+`voice.active=cosyvoice:clone`, and verifies synthesis immediately.
 
 If auto-detection cannot find your CosyVoice install, set launcher manually:
 

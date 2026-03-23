@@ -191,6 +191,43 @@ async fn run() -> std::result::Result<(), Box<dyn std::error::Error>> {
                     serde_json::json!({"ok": true, "action": "voice_set", "name": name})
                 );
             }
+            cli::VoiceAction::Clone {
+                source_url,
+                profile,
+                speaker,
+                start,
+                duration_sec,
+                prompt_text,
+                verification_text,
+                skip_runtime_check,
+            } => {
+                let result = cli::voice::clone_from_url(cli::voice::VoiceCloneRequest {
+                    source_url,
+                    profile,
+                    speaker,
+                    start,
+                    duration_sec,
+                    prompt_text,
+                    verification_text,
+                    skip_runtime_check,
+                })
+                .await?;
+                println!(
+                    "{}",
+                    serde_json::json!({
+                        "ok": true,
+                        "action": "voice_clone",
+                        "profile": result.profile,
+                        "speaker": result.speaker,
+                        "prompt_wav": result.prompt_wav,
+                        "source_audio": result.source_audio,
+                        "voice_active": result.voice_active,
+                        "cosyvoice_mode": result.cosyvoice_mode,
+                        "runtime_verified": result.runtime_verified,
+                        "verification_output": result.verification_output
+                    })
+                );
+            }
             cli::VoiceAction::Tone { action } => match action {
                 cli::VoiceToneAction::List => {
                     cli::voice::list_tones()?;
