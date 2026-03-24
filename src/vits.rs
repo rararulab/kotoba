@@ -2,7 +2,11 @@
 //!
 //! Pipeline: kana text -> phoneme IDs -> ONNX model inference -> WAV file.
 
-use std::path::Path;
+use std::{
+    collections::HashMap,
+    path::{Path, PathBuf},
+    sync::{Arc, Mutex, OnceLock},
+};
 
 use ndarray::Array2;
 use ort::{inputs, session::Session, value::TensorRef};
@@ -36,6 +40,42 @@ pub enum VitsError {
 
 /// Module-level result type.
 pub type Result<T> = std::result::Result<T, VitsError>;
+
+static VITS_SESSION_CACHE: OnceLock<Mutex<HashMap<PathBuf, Arc<Mutex<Session>>>>> = OnceLock::new();
+
+fn session_cache() -> &'static Mutex<HashMap<PathBuf, Arc<Mutex<Session>>>> {
+    VITS_SESSION_CACHE.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+fn cached_session(model_path: &Path) -> Result<Arc<Mutex<Session>>> {
+    let cached = {
+        let cache = session_cache()
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        cache.get(model_path).cloned()
+    };
+    if let Some(session) = cached {
+        return Ok(session);
+    }
+
+    let session = Arc::new(Mutex::new(
+        Session::builder()
+            .context(OnnxRuntimeSnafu)?
+            .commit_from_file(model_path)
+            .context(OnnxRuntimeSnafu)?,
+    ));
+
+    {
+        let mut cache = session_cache()
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if let Some(existing) = cache.get(model_path) {
+            return Ok(Arc::clone(existing));
+        }
+        cache.insert(model_path.to_path_buf(), Arc::clone(&session));
+    }
+    Ok(session)
+}
 
 /// Convert kana text to a sequence of phoneme IDs for VITS input.
 ///
@@ -115,45 +155,49 @@ pub async fn synthesize(model_name: &str, text: &str, output: &Path) -> Result<(
 ///
 /// Creates input tensors (phoneme IDs, lengths, scales), runs the model,
 /// and writes the output audio to a WAV file.
+#[allow(clippy::significant_drop_tightening)] // ort outputs borrow session internals
 fn run_inference(model_path: &Path, phoneme_ids: &[i64], output: &Path) -> Result<()> {
-    let mut session = Session::builder()
-        .context(OnnxRuntimeSnafu)?
-        .commit_from_file(model_path)
-        .context(OnnxRuntimeSnafu)?;
+    let session_handle = cached_session(model_path)?;
+    let audio_data: Vec<f32> = {
+        let mut session = session_handle
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
 
-    let seq_len = phoneme_ids.len();
+        let seq_len = phoneme_ids.len();
 
-    // Shape: [1, seq_len] — batch of 1 utterance
-    let ids_array = Array2::from_shape_vec((1, seq_len), phoneme_ids.to_vec())
-        .expect("phoneme_ids shape must match array dimensions");
+        // Shape: [1, seq_len] — batch of 1 utterance
+        let ids_array = Array2::from_shape_vec((1, seq_len), phoneme_ids.to_vec())
+            .expect("phoneme_ids shape must match array dimensions");
 
-    let ids_tensor = TensorRef::from_array_view(&ids_array).context(OnnxRuntimeSnafu)?;
+        let ids_tensor = TensorRef::from_array_view(&ids_array).context(OnnxRuntimeSnafu)?;
 
-    // Input lengths tensor: [1] — single utterance length
-    #[allow(clippy::cast_possible_wrap)] // seq_len is always small (phoneme count)
-    let lengths_data = vec![seq_len as i64];
-    let lengths_tensor =
-        TensorRef::from_array_view(([1usize], &*lengths_data)).context(OnnxRuntimeSnafu)?;
+        // Input lengths tensor: [1] — single utterance length
+        #[allow(clippy::cast_possible_wrap)] // seq_len is always small (phoneme count)
+        let lengths_data = vec![seq_len as i64];
+        let lengths_tensor =
+            TensorRef::from_array_view(([1usize], &*lengths_data)).context(OnnxRuntimeSnafu)?;
 
-    // Scales tensor: [noise_scale, length_scale, noise_w]
-    let scales_data: Vec<f32> = vec![0.667, 1.0, 0.8];
-    let scales_tensor =
-        TensorRef::from_array_view(([3usize], &*scales_data)).context(OnnxRuntimeSnafu)?;
+        // Scales tensor: [noise_scale, length_scale, noise_w]
+        let scales_data: Vec<f32> = vec![0.667, 1.0, 0.8];
+        let scales_tensor =
+            TensorRef::from_array_view(([3usize], &*scales_data)).context(OnnxRuntimeSnafu)?;
 
-    let outputs = session
-        .run(inputs![
-            "input" => ids_tensor,
-            "input_lengths" => lengths_tensor,
-            "scales" => scales_tensor
-        ])
-        .context(OnnxRuntimeSnafu)?;
+        let outputs = session
+            .run(inputs![
+                "input" => ids_tensor,
+                "input_lengths" => lengths_tensor,
+                "scales" => scales_tensor
+            ])
+            .context(OnnxRuntimeSnafu)?;
 
-    let audio_tensor = &outputs[0];
-    let (_, audio_data) = audio_tensor
-        .try_extract_tensor::<f32>()
-        .context(OnnxRuntimeSnafu)?;
+        let audio_tensor = &outputs[0];
+        let (_, audio_data) = audio_tensor
+            .try_extract_tensor::<f32>()
+            .context(OnnxRuntimeSnafu)?;
+        audio_data.to_vec()
+    };
 
-    write_wav(output, audio_data)
+    write_wav(output, &audio_data)
 }
 
 /// Write raw f32 audio samples to a 16-bit PCM WAV file.
