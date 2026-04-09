@@ -11,6 +11,7 @@ git clone https://github.com/rararulab/kotoba && cd kotoba && cargo install --pa
 ## Documentation
 
 - Chinese quick guide: [docs/usage.zh-CN.md](docs/usage.zh-CN.md)
+- TTS API server architecture: [docs/architecture/serve.md](docs/architecture/serve.md)
 
 ## Quick Start
 
@@ -82,7 +83,68 @@ kotoba setup                             # Full setup (VOICEVOX + DB + default K
 kotoba doctor                            # Health check all dependencies
 kotoba doctor --json                     # Machine-readable health report
 kotoba config set voice.active kokoro:af_heart  # Set config values
+kotoba serve --port 3000                 # Start OpenAI-compatible TTS API server
 ```
+
+## TTS API Server (`kotoba serve`)
+
+Exposes kotoba's TTS pipeline (Kokoro/VOICEVOX/VITS + RVC) over HTTP and WebSocket
+for use as a drop-in TTS backend for OpenAI-compatible clients (e.g. rara).
+
+```bash
+kotoba serve --host 127.0.0.1 --port 3000
+```
+
+### Endpoints
+
+| Endpoint | Protocol | Purpose |
+|----------|----------|---------|
+| `POST /v1/audio/speech` | HTTP | OpenAI-compatible batch synthesis |
+| `WS /ws/tts` | WebSocket | Sentence-level streaming with cancellation |
+| `GET /v1/voices` | HTTP | List available voices |
+| `GET /health` | HTTP | Health check |
+
+### HTTP batch synthesis
+
+```bash
+curl -X POST http://localhost:3000/v1/audio/speech \
+  -H 'Content-Type: application/json' \
+  -d '{"input":"こんにちは","voice":"kokoro:jf_alpha"}' \
+  -o speech.wav
+```
+
+Request fields: `input` (required), `voice` (required), `model`, `response_format`, `speed`.
+
+### WebSocket streaming
+
+The `/ws/tts` endpoint splits input on Japanese sentence boundaries (`。！？\n`)
+and streams each sentence's audio as a separate binary frame, optimizing
+first-chunk latency.
+
+```
+Client → {"text": "長い文。複数の文。", "voice": "kokoro:jf_alpha"}
+Server → [binary: WAV for sentence 1]
+Server → {"type": "chunk", "index": 0}
+Server → [binary: WAV for sentence 2]
+Server → {"type": "chunk", "index": 1}
+Server → {"type": "done", "chunks": 2}
+```
+
+Cancel mid-stream:
+```
+Client → {"type": "cancel"}
+Server → {"type": "cancelled"}
+```
+
+Both tagged (`{"type":"tts",...}`) and legacy untagged (`{"text":...}`) request
+formats are supported.
+
+### Voice routing
+
+The `voice` field is resolved in this order:
+1. `backend:speaker_id` (e.g. `kokoro:jf_alpha`, `voicevox:3`) — direct TTS
+2. RVC model name (e.g. `hanazawa-kana`) — Kokoro TTS + RVC conversion
+3. Bare Kokoro voice name (e.g. `jf_alpha`) — Kokoro TTS
 
 ## TTS Backends
 
