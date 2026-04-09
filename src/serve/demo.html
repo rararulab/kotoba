@@ -581,16 +581,24 @@ function openTtsSocket() {
 
 function sendSentenceToTts(sentence) {
   if (!ttsWs) ttsWs = openTtsSocket();
+  // Capture a local reference: the deferred 'open' callback may fire after
+  // the module-global `ttsWs` has been cleared by post-turn cleanup, and
+  // we must still send on the same socket the sentence was queued for.
+  const ws = ttsWs;
   const payload = {
     type: 'tts',
     text: sentence,
     voice: el.voice.value,
   };
-  const send = () => ttsWs.send(JSON.stringify(payload));
-  if (ttsWs.readyState === WebSocket.OPEN) {
+  const send = () => {
+    if (ws.readyState !== WebSocket.OPEN) return;
+    try { ws.send(JSON.stringify(payload)); }
+    catch (e) { console.warn('tts send failed', e); }
+  };
+  if (ws.readyState === WebSocket.OPEN) {
     send();
-  } else if (ttsWs.readyState === WebSocket.CONNECTING) {
-    ttsWs.addEventListener('open', send, { once: true });
+  } else if (ws.readyState === WebSocket.CONNECTING) {
+    ws.addEventListener('open', send, { once: true });
   }
 }
 
