@@ -300,7 +300,11 @@ const STORAGE_KEYS = {
 for (const [field, key] of Object.entries(STORAGE_KEYS)) {
   const stored = localStorage.getItem(key);
   if (stored !== null && el[field]) el[field].value = stored;
-  if (el[field]) el[field].addEventListener('change', () => {
+  // Use `input` (fires on every keystroke / select change) rather than
+  // `change` (which only fires on blur for text inputs and textareas), so
+  // settings persist even if the user clicks Start without leaving the
+  // field first.
+  if (el[field]) el[field].addEventListener('input', () => {
     localStorage.setItem(key, el[field].value);
   });
 }
