@@ -1,6 +1,6 @@
 //! Route handlers for the OpenAI-compatible TTS API.
 
-use std::{path::Path, sync::Arc};
+use std::{path::Path, sync::Arc, time::Duration};
 
 use axum::{
     Json,
@@ -13,7 +13,7 @@ use axum::{
 };
 
 use super::models::{
-    ApiError, SpeechRequest, VoiceEntry, VoiceListResponse, WsResponse, WsTtsRequest,
+    ApiError, SpeechRequest, VoiceEntry, VoiceListResponse, WsClientMessage, WsResponse,
 };
 use crate::tts::{KokoroBackend, TtsBackend, VitsBackend, VoicevoxBackend};
 
@@ -299,10 +299,14 @@ fn has_pth_file(dir: &Path) -> bool {
 
 /// `GET /ws/tts` — WebSocket endpoint for streaming TTS synthesis.
 ///
-/// Accepts JSON text messages with a [`WsTtsRequest`] payload, synthesizes
-/// speech, and sends the resulting WAV audio as a binary message followed by
-/// a `{"type": "done"}` text message.  The connection stays open for
-/// multiple sequential requests.
+/// Accepts JSON text messages with a [`WsClientMessage`] payload, splits the
+/// input into sentences, synthesizes each independently, and streams the
+/// resulting WAV audio as individual binary frames.  Each binary frame is
+/// followed by a `{"type": "chunk", "index": N}` text message, and the
+/// final chunk is followed by `{"type": "done", "chunks": N}`.
+///
+/// The client may send `{"type": "cancel"}` at any time to abort remaining
+/// chunks.  The connection stays open for multiple sequential requests.
 pub async fn ws_tts(State(state): State<AppState>, ws: WebSocketUpgrade) -> impl IntoResponse {
     ws.on_upgrade(|socket| handle_ws_tts(socket, state))
 }
@@ -312,9 +316,30 @@ async fn handle_ws_tts(mut socket: WebSocket, state: AppState) {
     while let Some(Ok(msg)) = socket.recv().await {
         match msg {
             Message::Text(text) => {
-                if process_ws_tts_request(&mut socket, &state, &text).await == Err(()) {
-                    // Connection broken — stop processing.
-                    break;
+                match WsClientMessage::parse(&text) {
+                    Ok(WsClientMessage::Tts {
+                        text: tts_text,
+                        voice,
+                        speed,
+                    }) => {
+                        if process_ws_tts_request(&mut socket, &state, &tts_text, &voice, speed)
+                            .await
+                            .is_err()
+                        {
+                            break;
+                        }
+                    }
+                    Ok(WsClientMessage::Cancel) => {
+                        // Cancel outside of synthesis is a no-op.
+                    }
+                    Err(e) => {
+                        if send_ws_error(&mut socket, format!("invalid JSON: {e}"))
+                            .await
+                            .is_err()
+                        {
+                            break;
+                        }
+                    }
                 }
             }
             Message::Close(_) => break,
@@ -324,109 +349,174 @@ async fn handle_ws_tts(mut socket: WebSocket, state: AppState) {
     }
 }
 
-/// Process a single TTS request received over the WebSocket.
+/// Split text into sentences on Japanese sentence boundaries.
+///
+/// Splits on `。`, `！`, `？`, `！`, `？`, and `\n`, keeping the delimiter
+/// attached to the preceding sentence.  Empty chunks are filtered out.
+/// If no delimiters are found, returns the whole text as a single chunk.
+fn split_sentences(text: &str) -> Vec<String> {
+    let mut sentences = Vec::new();
+    let mut current = String::new();
+
+    for ch in text.chars() {
+        current.push(ch);
+        if matches!(ch, '。' | '！' | '？' | '!' | '?' | '\n') {
+            let trimmed = current.trim().to_string();
+            if !trimmed.is_empty() {
+                sentences.push(trimmed);
+            }
+            current.clear();
+        }
+    }
+
+    // Remaining text after the last delimiter.
+    let trimmed = current.trim().to_string();
+    if !trimmed.is_empty() {
+        sentences.push(trimmed);
+    }
+
+    sentences
+}
+
+/// Check whether an incoming WebSocket message is a cancel request.
+fn is_cancel_message(msg: &Message) -> bool {
+    match msg {
+        Message::Text(text) => {
+            WsClientMessage::parse(text).is_ok_and(|m| matches!(m, WsClientMessage::Cancel))
+        }
+        _ => false,
+    }
+}
+
+/// Process a single TTS request with sentence-level streaming.
+///
+/// Splits the input text into sentences, synthesizes each one independently,
+/// and sends the audio as individual binary frames.  Between sentences, the
+/// socket is polled (non-blocking) for a cancel message.
 ///
 /// Returns `Err(())` when the socket write fails (connection lost).
 async fn process_ws_tts_request(
     socket: &mut WebSocket,
     state: &AppState,
     text: &str,
+    voice: &str,
+    speed: Option<f64>,
 ) -> Result<(), ()> {
-    let req: WsTtsRequest = match serde_json::from_str(text) {
-        Ok(r) => r,
-        Err(e) => {
-            return send_ws_error(socket, format!("invalid JSON: {e}")).await;
-        }
-    };
-
-    if req.text.trim().is_empty() {
+    if text.trim().is_empty() {
         return send_ws_error(socket, "text must not be empty".to_string()).await;
     }
 
     #[allow(clippy::cast_possible_truncation)]
-    let speed = req
-        .speed
-        .unwrap_or(state.config.voice.speed)
-        .clamp(0.5, 2.0) as f32;
+    let speed = speed.unwrap_or(state.config.voice.speed).clamp(0.5, 2.0) as f32;
 
-    let (backend_name, speaker_id, rvc_model) = match resolve_voice(&req.voice, &state.config) {
+    let (backend_name, speaker_id, rvc_model) = match resolve_voice(voice, &state.config) {
         Ok(v) => v,
         Err((_, Json(api_err))) => {
             return send_ws_error(socket, api_err.error.message).await;
         }
     };
 
-    // Synthesize to a temporary file.
-    let tmp_dir = match tempfile::tempdir() {
-        Ok(d) => d,
-        Err(e) => {
-            return send_ws_error(socket, format!("failed to create temp dir: {e}")).await;
-        }
-    };
-    let tts_output = tmp_dir.path().join("speech.wav");
+    let sentences = split_sentences(text);
+    let total = sentences.len();
 
-    let backend: Box<dyn TtsBackend> = match backend_name.as_str() {
-        "kokoro" => Box::new(KokoroBackend::new(speaker_id.clone(), speed)),
-        "voicevox" => {
-            let url = state.config.voicevox.url.clone();
-            Box::new(VoicevoxBackend::new(url, speaker_id.clone()))
+    for (i, sentence) in sentences.iter().enumerate() {
+        // Non-blocking check for cancel before each synthesis.
+        if check_for_cancel(socket).await {
+            return send_ws_json(socket, &WsResponse::cancelled()).await;
         }
-        "vits" => Box::new(VitsBackend::new(speaker_id.clone())),
-        other => {
-            return send_ws_error(socket, format!("unknown backend: {other}")).await;
+
+        // Synthesize this sentence to a temporary file.
+        let tmp_dir = match tempfile::tempdir() {
+            Ok(d) => d,
+            Err(e) => {
+                return send_ws_error(socket, format!("failed to create temp dir: {e}")).await;
+            }
+        };
+        let tts_output = tmp_dir.path().join("speech.wav");
+
+        let backend: Box<dyn TtsBackend> = match backend_name.as_str() {
+            "kokoro" => Box::new(KokoroBackend::new(speaker_id.clone(), speed)),
+            "voicevox" => {
+                let url = state.config.voicevox.url.clone();
+                Box::new(VoicevoxBackend::new(url, speaker_id.clone()))
+            }
+            "vits" => Box::new(VitsBackend::new(speaker_id.clone())),
+            other => {
+                return send_ws_error(socket, format!("unknown backend: {other}")).await;
+            }
+        };
+
+        if let Err(e) = backend.synthesize(sentence, &tts_output).await {
+            return send_ws_error(socket, format!("TTS synthesis failed: {e}")).await;
         }
-    };
 
-    if let Err(e) = backend.synthesize(&req.text, &tts_output).await {
-        return send_ws_error(socket, format!("TTS synthesis failed: {e}")).await;
-    }
+        // Apply RVC voice conversion if configured.
+        let final_path = if let Some(ref model) = rvc_model {
+            let rvc_output = tmp_dir.path().join("speech_rvc.wav");
+            #[allow(clippy::cast_possible_truncation)]
+            let index_influence = state.config.rvc.index_influence.clamp(0.0, 1.0) as f32;
+            if let Err(e) = crate::rvc::convert(
+                &tts_output,
+                model,
+                state.config.rvc.pitch,
+                &state.config.rvc.pitch_algo,
+                index_influence,
+                &rvc_output,
+            )
+            .await
+            {
+                return send_ws_error(socket, format!("RVC conversion failed: {e}")).await;
+            }
+            rvc_output
+        } else {
+            tts_output
+        };
 
-    // Apply RVC voice conversion if needed.
-    let final_path = if let Some(model) = rvc_model {
-        let rvc_output = tmp_dir.path().join("speech_rvc.wav");
-        #[allow(clippy::cast_possible_truncation)]
-        let index_influence = state.config.rvc.index_influence.clamp(0.0, 1.0) as f32;
-        if let Err(e) = crate::rvc::convert(
-            &tts_output,
-            &model,
-            state.config.rvc.pitch,
-            &state.config.rvc.pitch_algo,
-            index_influence,
-            &rvc_output,
-        )
-        .await
+        // Read audio bytes and send as binary frame.
+        let audio_bytes = match tokio::fs::read(&final_path).await {
+            Ok(b) => b,
+            Err(e) => {
+                return send_ws_error(socket, format!("failed to read audio file: {e}")).await;
+            }
+        };
+
+        if socket
+            .send(Message::Binary(audio_bytes.into()))
+            .await
+            .is_err()
         {
-            return send_ws_error(socket, format!("RVC conversion failed: {e}")).await;
+            return Err(());
         }
-        rvc_output
-    } else {
-        tts_output
-    };
 
-    // Read audio bytes and send as binary message.
-    let audio_bytes = match tokio::fs::read(&final_path).await {
-        Ok(b) => b,
-        Err(e) => {
-            return send_ws_error(socket, format!("failed to read audio file: {e}")).await;
-        }
-    };
+        // Send chunk completion marker.
+        send_ws_json(socket, &WsResponse::chunk(i)).await?;
+    }
 
-    if socket
-        .send(Message::Binary(audio_bytes.into()))
+    // All chunks sent successfully.
+    send_ws_json(socket, &WsResponse::done(total)).await
+}
+
+/// Non-blocking check for a cancel message on the socket.
+///
+/// Uses a zero-duration timeout so that this returns immediately when no
+/// message is pending.  Cancel is only detected between sentences, which
+/// is an acceptable trade-off to avoid splitting the socket.
+async fn check_for_cancel(socket: &mut WebSocket) -> bool {
+    matches!(
+        tokio::time::timeout(Duration::ZERO, socket.recv()).await,
+        Ok(Some(Ok(msg))) if is_cancel_message(&msg)
+    )
+}
+
+/// Send a JSON-serialized [`WsResponse`] as a text frame.
+///
+/// Returns `Err(())` when the connection is broken.
+async fn send_ws_json(socket: &mut WebSocket, response: &WsResponse) -> Result<(), ()> {
+    let json = serde_json::to_string(response).expect("WsResponse serializes to JSON");
+    socket
+        .send(Message::Text(json.into()))
         .await
-        .is_err()
-    {
-        return Err(());
-    }
-
-    // Send completion marker.
-    let done_json =
-        serde_json::to_string(&WsResponse::done()).expect("WsResponse serializes to JSON");
-    if socket.send(Message::Text(done_json.into())).await.is_err() {
-        return Err(());
-    }
-
-    Ok(())
+        .map_err(|_| ())
 }
 
 /// Send an error message over the WebSocket.
@@ -434,10 +524,5 @@ async fn process_ws_tts_request(
 /// Returns `Ok(())` if the message was sent (caller should continue the
 /// loop), or `Err(())` if the connection is broken.
 async fn send_ws_error(socket: &mut WebSocket, message: String) -> Result<(), ()> {
-    let json =
-        serde_json::to_string(&WsResponse::error(message)).expect("WsResponse serializes to JSON");
-    socket
-        .send(Message::Text(json.into()))
-        .await
-        .map_err(|_| ())
+    send_ws_json(socket, &WsResponse::error(message)).await
 }
