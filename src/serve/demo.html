@@ -222,7 +222,7 @@
     </div>
     <div class="field">
       <label>Voice</label>
-      <input type="text" id="s-voice" placeholder="kokoro:jf_alpha">
+      <select id="s-voice"><option value="kokoro:jf_alpha">kokoro:jf_alpha (default)</option></select>
     </div>
     <div class="field">
       <label>System Prompt</label>
@@ -267,6 +267,25 @@ function saveSettings(s) {
 }
 
 let settings = loadSettings();
+
+// Populate voice dropdown from /v1/voices on page load.
+(async function loadVoices() {
+  const sel = document.getElementById('s-voice');
+  try {
+    const r = await fetch('/v1/voices');
+    const data = await r.json();
+    if (data.voices && data.voices.length > 0) {
+      sel.innerHTML = '';
+      for (const v of data.voices) {
+        const opt = document.createElement('option');
+        opt.value = v.id;
+        opt.textContent = `${v.id} — ${v.name}`;
+        if (v.id === settings.voice) opt.selected = true;
+        sel.appendChild(opt);
+      }
+    }
+  } catch (_) { /* keep default option */ }
+})();
 
 // DOM refs
 const orbEl = document.getElementById('orb');

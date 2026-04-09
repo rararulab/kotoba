@@ -428,6 +428,15 @@ async fn stream_llm(
     // Buffer for incomplete SSE lines across chunk boundaries.
     let mut line_buf = String::new();
 
+    // Incremental tracker for `<think>...</think>` blocks emitted by
+    // reasoning models (Qwen, DeepSeek, etc.).  Tokens inside these
+    // blocks are recorded in full_text (for display) but NOT forwarded
+    // to the sentence buffer / TTS pipeline.
+    let mut inside_think = false;
+    // Partial tag buffer: when we see `<` we accumulate chars until we
+    // can decide whether it's `<think>` or `</think>` or something else.
+    let mut tag_buf = String::new();
+
     while let Some(chunk_result) = stream.next().await {
         let chunk = chunk_result.map_err(|e| format!("LLM stream error: {e}"))?;
         let text = String::from_utf8_lossy(&chunk);
@@ -451,9 +460,15 @@ async fn stream_llm(
                 && let Some(content) = json["choices"][0]["delta"]["content"].as_str()
             {
                 full_text.push_str(content);
-                sentence_buf.push_str(content);
 
-                // Send partial text update.
+                // Filter thinking blocks: only pass visible text to TTS.
+                let visible = strip_think_incremental(content, &mut inside_think, &mut tag_buf);
+                if !visible.is_empty() {
+                    sentence_buf.push_str(&visible);
+                }
+
+                // Send partial text update (full_text includes thinking
+                // for UI display; the server can show it greyed out).
                 let _ = partial_tx.send(full_text.clone()).await;
 
                 // Check for sentence boundaries and emit complete sentences.
@@ -483,6 +498,54 @@ fn find_sentence_boundary(text: &str) -> Option<usize> {
     text.char_indices()
         .find(|(_, ch)| matches!(ch, '。' | '！' | '？' | '!' | '?' | '\n'))
         .map(|(i, ch)| i + ch.len_utf8() - 1)
+}
+
+// ---------------------------------------------------------------------------
+// Thinking block filter
+// ---------------------------------------------------------------------------
+
+/// Incrementally strip `<think>...</think>` blocks from a token stream.
+///
+/// Reasoning models (`Qwen`, `DeepSeek`) wrap internal reasoning in these tags.
+/// Since tokens arrive one at a time, the opening/closing tags may be split
+/// across multiple calls.  We maintain state via `inside_think` (whether we
+/// are currently inside a block) and `tag_buf` (partial tag being accumulated).
+///
+/// Returns the portion of `token` that is visible (outside thinking blocks).
+fn strip_think_incremental(token: &str, inside_think: &mut bool, tag_buf: &mut String) -> String {
+    let mut visible = String::new();
+
+    for ch in token.chars() {
+        if !tag_buf.is_empty() {
+            // We're accumulating a potential tag.
+            tag_buf.push(ch);
+            if ch == '>' {
+                // Tag complete — check what it is.
+                let tag = tag_buf.to_lowercase();
+                if tag == "<think>" {
+                    *inside_think = true;
+                } else if tag == "</think>" {
+                    *inside_think = false;
+                } else if !*inside_think {
+                    // Not a think tag and we're outside — emit the buffer.
+                    visible.push_str(tag_buf);
+                }
+                tag_buf.clear();
+            } else if tag_buf.len() > 10 {
+                // Too long to be `<think>` or `</think>` — flush and reset.
+                if !*inside_think {
+                    visible.push_str(tag_buf);
+                }
+                tag_buf.clear();
+            }
+        } else if ch == '<' {
+            tag_buf.push(ch);
+        } else if !*inside_think {
+            visible.push(ch);
+        }
+    }
+
+    visible
 }
 
 // ---------------------------------------------------------------------------
