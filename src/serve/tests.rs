@@ -230,21 +230,36 @@ async fn demo_returns_html_page() {
         .expect("ascii content-type");
     assert!(ct.starts_with("text/html"), "got content-type: {ct}");
     let body = resp.text().await.expect("html body");
-    assert!(body.contains("<title>kotoba TTS"));
-    assert!(body.contains("/ws/tts"));
-    // Voice chat demo markers: the page advertises itself as a voice
-    // chat experience, uses the browser SpeechRecognition API, and
-    // calls an OpenAI-compatible chat completions endpoint.
-    assert!(body.contains("voice chat"));
-    assert!(body.contains("SpeechRecognition"));
-    assert!(body.contains("chat/completions"));
-    // Regression: do not close the TTS socket on a fixed timer.
-    assert!(body.contains("waitForTtsDrain"));
-    assert!(!body.contains("socketToClose?.close"));
-    // Regression: strip model `<think>` blocks before rendering/TTS.
-    assert!(body.contains("stripThinkingBlocks"));
-    // Regression: keep speaking-stage barge-in from echo-looping.
-    assert!(body.contains("isLikelyAssistantEcho"));
+    assert!(body.contains("<title>kotoba"));
+    // mlx-live-style voice pipeline: connects via /ws/voice and uses
+    // an AudioWorklet for PCM recording.
+    assert!(body.contains("/ws/voice"));
+    assert!(body.contains("pcm-recorder-worklet"));
+    assert!(body.contains("AudioWorklet"));
+    // Settings are persisted in localStorage.
+    assert!(body.contains("localStorage"));
+}
+
+#[tokio::test]
+async fn pcm_worklet_returns_javascript() {
+    let url = test_server().await;
+    let resp = reqwest::get(format!("{url}/static/pcm-recorder-worklet.js"))
+        .await
+        .expect("worklet request");
+    assert_eq!(resp.status(), 200);
+    let ct = resp
+        .headers()
+        .get("content-type")
+        .expect("content-type header")
+        .to_str()
+        .expect("ascii content-type");
+    assert!(
+        ct.contains("javascript"),
+        "expected javascript content-type, got: {ct}"
+    );
+    let body = resp.text().await.expect("js body");
+    assert!(body.contains("PcmRecorderProcessor"));
+    assert!(body.contains("registerProcessor"));
 }
 
 // ---------------------------------------------------------------------------

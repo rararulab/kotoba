@@ -6,7 +6,7 @@ use async_trait::async_trait;
 use axum::{
     Json,
     extract::{
-        State,
+        Query, State,
         ws::{Message, WebSocket, WebSocketUpgrade},
     },
     http::{HeaderMap, StatusCode, header},
@@ -570,4 +570,30 @@ async fn send_ws_json(socket: &mut WebSocket, response: &WsResponse) -> Result<(
 /// loop), or `Err(())` if the connection is broken.
 async fn send_ws_error(socket: &mut WebSocket, message: String) -> Result<(), ()> {
     send_ws_json(socket, &WsResponse::error(message)).await
+}
+
+/// Bundled PCM recorder `AudioWorklet` processor.
+const PCM_WORKLET_JS: &str = include_str!("pcm_worklet.js");
+
+/// `GET /static/pcm-recorder-worklet.js` — serve the `AudioWorklet` processor.
+pub async fn pcm_worklet() -> impl IntoResponse {
+    (
+        [(
+            header::CONTENT_TYPE,
+            "application/javascript; charset=utf-8",
+        )],
+        PCM_WORKLET_JS,
+    )
+}
+
+/// `GET /ws/voice` — WebSocket endpoint for real-time voice conversation.
+///
+/// Accepts query parameters for ASR/LLM/TTS configuration and upgrades to
+/// a WebSocket that runs the full voice pipeline server-side.
+pub async fn voice_ws(
+    State(state): State<AppState>,
+    Query(params): Query<super::voice::VoiceParams>,
+    ws: WebSocketUpgrade,
+) -> impl IntoResponse {
+    ws.on_upgrade(move |socket| super::voice::handle_voice_ws(socket, state, params))
 }
