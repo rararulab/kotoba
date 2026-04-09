@@ -69,12 +69,14 @@
     font-size: 12px; color: var(--muted);
     text-align: right;
   }
-  input[type="text"], select {
+  input[type="text"], input[type="password"], select, .settings-grid textarea {
     font-family: inherit; font-size: 13px; color: var(--text);
     background: var(--bg); border: 1px solid var(--border); border-radius: 6px;
     padding: 8px 10px; outline: none; width: 100%;
   }
-  input[type="text"]:focus, select:focus { border-color: var(--accent); }
+  .settings-grid textarea { resize: vertical; line-height: 1.4; min-height: 36px; }
+  input[type="text"]:focus, input[type="password"]:focus,
+  select:focus, .settings-grid textarea:focus { border-color: var(--accent); }
   select {
     cursor: pointer; appearance: none;
     background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath fill='%238a8f99' d='M6 8L2 4h8z'/%3E%3C/svg%3E");
@@ -187,7 +189,7 @@
 <body>
 <div class="container">
   <h1>kotoba — voice chat</h1>
-  <div class="subtitle">Real-time Japanese voice conversation · STT → LLM → streaming TTS</div>
+  <div class="subtitle">Real-time multilingual voice conversation · STT → LLM → streaming TTS</div>
 
   <!-- Settings panel -->
   <div class="panel">
@@ -218,8 +220,8 @@
         <select id="voice"></select>
 
         <label for="system-prompt">System</label>
-        <input type="text" id="system-prompt"
-               value="You are a friendly conversation partner. Reply in the same language as the user, and keep responses short and natural.">
+        <textarea id="system-prompt" rows="2"
+          >You are a friendly conversation partner. Reply in the same language as the user, and keep responses short and natural.</textarea>
       </div>
     </details>
   </div>
@@ -419,6 +421,29 @@ function clearInterim() {
 // Voices
 // ---------------------------------------------------------------------------
 
+// Map a UI language code to the Kokoro voice prefix that best matches it.
+// Kokoro v1.0 uses single-letter prefixes: a/b = English, j = Japanese,
+// z = Mandarin Chinese, etc.
+function preferredKokoroPrefixForLang(lang) {
+  if (lang.startsWith('zh')) return 'z';
+  if (lang.startsWith('ja')) return 'j';
+  if (lang.startsWith('en')) return 'a';
+  return null;
+}
+
+// Pick a sensible default voice for the currently selected language.
+function pickDefaultVoiceForLang(lang) {
+  const prefix = preferredKokoroPrefixForLang(lang);
+  if (!prefix) return null;
+  for (const opt of el.voice.options) {
+    const id = opt.value;
+    // strip "kokoro:" prefix if present
+    const name = id.startsWith('kokoro:') ? id.slice(7) : id;
+    if (name.startsWith(prefix)) return id;
+  }
+  return null;
+}
+
 async function loadVoices() {
   try {
     const r = await fetch('/v1/voices');
@@ -434,8 +459,22 @@ async function loadVoices() {
       opt.textContent = `${v.id} — ${v.name}`;
       el.voice.appendChild(opt);
     }
+    // Auto-select a voice that matches the currently chosen language.
+    const def = pickDefaultVoiceForLang(el.lang.value);
+    if (def) el.voice.value = def;
   } catch (e) {
     el.voice.innerHTML = '<option value="kokoro:jf_alpha">kokoro:jf_alpha (default)</option>';
+  }
+}
+
+// When the user changes language, snap voice to a matching language voice
+// (only if their current voice is from a different language family).
+function syncVoiceToLanguage() {
+  const currentPrefix = el.voice.value.replace(/^kokoro:/, '').charAt(0);
+  const desiredPrefix = preferredKokoroPrefixForLang(el.lang.value);
+  if (desiredPrefix && currentPrefix !== desiredPrefix) {
+    const match = pickDefaultVoiceForLang(el.lang.value);
+    if (match) el.voice.value = match;
   }
 }
 
@@ -830,12 +869,13 @@ function startRecognition() {
 }
 
 // Re-create the recognizer when the language changes so the new lang takes
-// effect on the next start.
+// effect on the next start, and snap the voice picker to a matching voice.
 el.lang.addEventListener('change', () => {
   if (recognition) {
     try { recognition.abort(); } catch (_) {}
     recognition = null;
   }
+  syncVoiceToLanguage();
 });
 
 function stopRecognition() {
