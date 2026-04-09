@@ -241,6 +241,8 @@ async fn demo_returns_html_page() {
     // Regression: do not close the TTS socket on a fixed timer.
     assert!(body.contains("waitForTtsDrain"));
     assert!(!body.contains("socketToClose?.close"));
+    // Regression: strip model `<think>` blocks before rendering/TTS.
+    assert!(body.contains("stripThinkingBlocks"));
 }
 
 // ---------------------------------------------------------------------------

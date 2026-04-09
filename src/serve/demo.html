@@ -368,6 +368,8 @@ let currentAssistantEl = null;
 
 /** The DOM element that previews interim (not-yet-final) STT text. */
 let interimEl = null;
+/** Monotonic turn id used to invalidate stale async turn continuations. */
+let activeTurnId = 0;
 
 // ---------------------------------------------------------------------------
 // UI helpers
@@ -692,6 +694,12 @@ function extractSentences(buffer) {
   return { sentences, remainder };
 }
 
+// Remove model reasoning blocks wrapped by `<think>...</think>` from text
+// before showing UI text or forwarding content to TTS.
+function stripThinkingBlocks(text) {
+  return text.replace(/<think\b[^>]*>[\s\S]*?(?:<\/think>|$)/gi, '');
+}
+
 // ---------------------------------------------------------------------------
 // LLM streaming
 // ---------------------------------------------------------------------------
@@ -768,6 +776,7 @@ async function streamLlm(userText, onToken) {
 
 async function handleUserTurn(userText) {
   if (!running) return;
+  const turnId = ++activeTurnId;
   setState(State.THINKING, 'thinking…');
 
   // Push user message to history + UI.
@@ -780,6 +789,10 @@ async function handleUserTurn(userText) {
 
   // Running buffer used by the sentence splitter.
   let textBuffer = '';
+  // Raw model text can include `<think>...</think>` blocks. We keep a raw
+  // stream and derive the visible/speakable text incrementally.
+  let rawText = '';
+  let visibleText = '';
 
   // Start (or reuse) the TTS socket for this turn.
   resetTtsDrainState();
@@ -789,23 +802,32 @@ async function handleUserTurn(userText) {
   ttsWs = openTtsSocket();
 
   const onToken = (delta) => {
-    if (!running) return;
-    // First token = transition to speaking as soon as we actually send audio.
+    if (!running || turnId !== activeTurnId) return;
+    rawText += delta;
+    const nextVisible = stripThinkingBlocks(rawText);
+    const visibleDelta = nextVisible.slice(visibleText.length);
+    if (!visibleDelta) return;
+    visibleText = nextVisible;
+
+    // First visible token = transition to speaking and arm barge-in.
     if (state === State.THINKING) {
       setState(State.SPEAKING, 'speaking…');
+      startRecognition();
     }
-    currentAssistantEl.textContent += delta;
+    currentAssistantEl.textContent += visibleDelta;
     el.conversation.scrollTop = el.conversation.scrollHeight;
 
-    textBuffer += delta;
+    textBuffer += visibleDelta;
     const { sentences, remainder } = extractSentences(textBuffer);
     textBuffer = remainder;
     for (const s of sentences) sendSentenceToTts(s);
   };
 
-  let fullText;
+  let fullText = '';
   try {
-    fullText = await streamLlm(userText, onToken);
+    await streamLlm(userText, onToken);
+    if (turnId !== activeTurnId || !running) return;
+    fullText = visibleText;
     hideBanner();
   } catch (err) {
     if (err.name === 'AbortError') {
@@ -819,6 +841,7 @@ async function handleUserTurn(userText) {
     currentAssistantEl.textContent = fullText;
     textBuffer = fullText;
     setState(State.SPEAKING, 'speaking…');
+    startRecognition();
   }
 
   // Flush any trailing partial sentence.
@@ -830,6 +853,7 @@ async function handleUserTurn(userText) {
   // Wait until all sentence-level TTS requests receive terminal server
   // responses before closing the socket.
   await waitForTtsDrain();
+  if (turnId !== activeTurnId || !running) return;
   if (ttsWs) {
     try { ttsWs.close(); } catch (_) { /* ignore */ }
     ttsWs = null;
@@ -845,6 +869,7 @@ async function handleUserTurn(userText) {
   // to listening. We poll the playback queue because AudioBuffer playback
   // has no single "all done" event across multiple buffers.
   await waitForPlaybackToDrain();
+  if (turnId !== activeTurnId || !running) return;
 
   if (running) {
     setState(State.LISTENING, 'listening…');
@@ -868,6 +893,7 @@ function waitForPlaybackToDrain() {
 // ---------------------------------------------------------------------------
 
 function interrupt() {
+  activeTurnId += 1;
   // Stop any in-flight LLM fetch.
   if (llmAbort) {
     try { llmAbort.abort(); } catch (_) { /* ignore */ }
@@ -919,6 +945,11 @@ function buildRecognition() {
     }
     if (interim) showInterim(interim);
     if (finalText.trim()) {
+      // Some engines may deliver final text without firing `onspeechstart`.
+      if (state === State.SPEAKING) {
+        interrupt();
+        setState(State.LISTENING, 'listening… (interrupted)');
+      }
       clearInterim();
       stopRecognition();
       handleUserTurn(finalText.trim()).catch((e) => console.error(e));
@@ -933,9 +964,8 @@ function buildRecognition() {
   };
 
   rec.onend = () => {
-    // Auto-restart while we're still in listening mode so the user
-    // can keep talking without pressing anything.
-    if (running && state === State.LISTENING) {
+    // Auto-restart while active so barge-in keeps working during speaking.
+    if (running && (state === State.LISTENING || state === State.SPEAKING)) {
       try { rec.start(); }
       catch (_) { /* start() throws if already started */ }
     }
