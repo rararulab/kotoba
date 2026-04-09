@@ -238,6 +238,9 @@ async fn demo_returns_html_page() {
     assert!(body.contains("voice chat"));
     assert!(body.contains("SpeechRecognition"));
     assert!(body.contains("chat/completions"));
+    // Regression: do not close the TTS socket on a fixed timer.
+    assert!(body.contains("waitForTtsDrain"));
+    assert!(!body.contains("socketToClose?.close"));
 }
 
 // ---------------------------------------------------------------------------
