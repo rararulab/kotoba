@@ -92,6 +92,8 @@ pub struct AppState {
     pub config:  Arc<crate::app_config::AppConfig>,
     /// Factory for creating TTS backends.
     pub factory: Arc<dyn BackendFactory>,
+    /// Default ASR endpoint URL (from managed Whisper or fallback).
+    pub asr_url: Arc<String>,
 }
 
 /// `GET /health` — returns a simple health-check response.
@@ -589,11 +591,16 @@ pub async fn pcm_worklet() -> impl IntoResponse {
 /// `GET /ws/voice` — WebSocket endpoint for real-time voice conversation.
 ///
 /// Accepts query parameters for ASR/LLM/TTS configuration and upgrades to
-/// a WebSocket that runs the full voice pipeline server-side.
+/// a WebSocket that runs the full voice pipeline server-side. When the client
+/// does not supply an `asr_url` query param, the managed Whisper URL is used.
 pub async fn voice_ws(
     State(state): State<AppState>,
-    Query(params): Query<super::voice::VoiceParams>,
+    Query(mut params): Query<super::voice::VoiceParams>,
     ws: WebSocketUpgrade,
 ) -> impl IntoResponse {
+    // Fall back to the managed ASR URL when the client did not provide one.
+    if params.asr_url.is_none() {
+        params.asr_url = Some((*state.asr_url).clone());
+    }
     ws.on_upgrade(move |socket| super::voice::handle_voice_ws(socket, state, params))
 }
