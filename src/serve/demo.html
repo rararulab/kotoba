@@ -206,12 +206,20 @@
         <input type="text" id="llm-model" value="qwen2.5:7b"
                placeholder="gpt-4o-mini, qwen2.5:7b, ...">
 
+        <label for="lang">Language</label>
+        <select id="lang">
+          <option value="ja-JP">日本語 (ja-JP)</option>
+          <option value="zh-CN">中文 (zh-CN)</option>
+          <option value="zh-TW">中文繁體 (zh-TW)</option>
+          <option value="en-US">English (en-US)</option>
+        </select>
+
         <label for="voice">Voice</label>
         <select id="voice"></select>
 
         <label for="system-prompt">System</label>
         <input type="text" id="system-prompt"
-               value="あなたは親切な日本語の会話パートナーです。短く自然に返答してください。">
+               value="You are a friendly conversation partner. Reply in the same language as the user, and keep responses short and natural.">
       </div>
     </details>
   </div>
@@ -274,6 +282,7 @@ const el = {
   llmUrl:      $('llm-url'),
   llmKey:      $('llm-key'),
   llmModel:    $('llm-model'),
+  lang:        $('lang'),
   systemPrompt:$('system-prompt'),
 };
 
@@ -283,6 +292,7 @@ const STORAGE_KEYS = {
   llmUrl:       'kotoba.demo.llmUrl',
   llmKey:       'kotoba.demo.llmKey',
   llmModel:     'kotoba.demo.llmModel',
+  lang:         'kotoba.demo.lang',
   systemPrompt: 'kotoba.demo.systemPrompt',
 };
 for (const [field, key] of Object.entries(STORAGE_KEYS)) {
@@ -759,7 +769,7 @@ function buildRecognition() {
     return null;
   }
   const rec = new SR();
-  rec.lang = 'ja-JP';
+  rec.lang = el.lang.value || 'ja-JP';
   rec.continuous = true;
   rec.interimResults = true;
 
@@ -818,6 +828,15 @@ function startRecognition() {
   try { recognition.start(); }
   catch (_) { /* already started */ }
 }
+
+// Re-create the recognizer when the language changes so the new lang takes
+// effect on the next start.
+el.lang.addEventListener('change', () => {
+  if (recognition) {
+    try { recognition.abort(); } catch (_) {}
+    recognition = null;
+  }
+});
 
 function stopRecognition() {
   if (!recognition) return;

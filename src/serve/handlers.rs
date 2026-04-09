@@ -18,6 +18,36 @@ use super::models::{
 };
 use crate::tts::{KokoroBackend, TtsBackend, VitsBackend, VoicevoxBackend};
 
+/// Built-in Kokoro v1.0 voice catalog grouped by language.
+///
+/// Kokoro v1.0 ships voices for many languages in a single `voices-v1.0.bin`
+/// file. The first character of each voice name encodes the language family:
+/// `a` = American English, `b` = British English, `j` = Japanese,
+/// `z` = Mandarin Chinese, etc.
+const KOKORO_VOICES: &[&str] = &[
+    // American English
+    "af_heart",
+    "af_bella",
+    "af_nicole",
+    "af_sarah",
+    "af_sky",
+    "am_adam",
+    "am_michael",
+    // Japanese
+    "jf_alpha",
+    "jf_gongitsune",
+    "jm_kumo",
+    // Mandarin Chinese
+    "zf_xiaobei",
+    "zf_xiaoni",
+    "zf_xiaoxiao",
+    "zf_xiaoyi",
+    "zm_yunjian",
+    "zm_yunxi",
+    "zm_yunxia",
+    "zm_yunyang",
+];
+
 /// Factory for creating TTS backends from a resolved voice target.
 #[async_trait]
 pub trait BackendFactory: Send + Sync {
@@ -86,19 +116,7 @@ pub async fn list_voices() -> impl IntoResponse {
     // Kokoro voices (available when the model file exists)
     let kokoro_model = models_dir.join("kokoro").join("kokoro-v1.0.onnx");
     if kokoro_model.exists() {
-        let kokoro_voices = [
-            "af_heart",
-            "af_bella",
-            "af_nicole",
-            "af_sarah",
-            "af_sky",
-            "am_adam",
-            "am_michael",
-            "jf_alpha",
-            "jf_gongitsune",
-            "jm_kumo",
-        ];
-        for name in &kokoro_voices {
+        for name in KOKORO_VOICES {
             voices.push(VoiceEntry {
                 id:      format!("kokoro:{name}"),
                 name:    format!("Kokoro {name}"),
@@ -291,19 +309,7 @@ fn resolve_voice(
     }
 
     // 3. Try as bare Kokoro voice name
-    let kokoro_voices = [
-        "af_heart",
-        "af_bella",
-        "af_nicole",
-        "af_sarah",
-        "af_sky",
-        "am_adam",
-        "am_michael",
-        "jf_alpha",
-        "jf_gongitsune",
-        "jm_kumo",
-    ];
-    if kokoro_voices.contains(&voice) {
+    if KOKORO_VOICES.contains(&voice) {
         return Ok(("kokoro".to_string(), voice.to_string(), None));
     }
 
