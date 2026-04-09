@@ -343,6 +343,12 @@ let llmAbort = null;
 
 /** The persistent TTS WebSocket for the current assistant turn. */
 let ttsWs = null;
+/** Number of sentence-level TTS requests sent and waiting for terminal
+ *  server responses (`done`/`error`/`cancelled`). */
+let ttsInFlight = 0;
+/** Deferred resolvers for callers waiting until all in-flight TTS requests
+ *  have finished. */
+let ttsDrainResolvers = [];
 
 /** Web Audio context (lazy-created on first user gesture so Safari
  *  doesn't block it). */
@@ -565,7 +571,9 @@ function openTtsSocket() {
     }
     try {
       const msg = JSON.parse(ev.data);
-      // chunk/done/cancelled/error — we only care about error for UI feedback.
+      if (msg.type === 'done' || msg.type === 'error' || msg.type === 'cancelled') {
+        settleOneTtsRequest();
+      }
       if (msg.type === 'error') {
         console.warn('tts error', msg.message);
       }
@@ -575,11 +583,42 @@ function openTtsSocket() {
   ws.addEventListener('error', () => {
     console.warn('tts ws error');
   });
+  ws.addEventListener('close', () => {
+    // Unexpected close with outstanding requests would otherwise leave the
+    // turn waiting forever.
+    if (ttsInFlight > 0) {
+      console.warn('tts ws closed with pending requests', ttsInFlight);
+      resetTtsDrainState();
+    }
+  });
 
   return ws;
 }
 
+function settleOneTtsRequest() {
+  if (ttsInFlight > 0) ttsInFlight -= 1;
+  resolveTtsDrainWaiters();
+}
+
+function resolveTtsDrainWaiters() {
+  if (ttsInFlight !== 0) return;
+  const waiters = ttsDrainResolvers;
+  ttsDrainResolvers = [];
+  for (const resolve of waiters) resolve();
+}
+
+function resetTtsDrainState() {
+  ttsInFlight = 0;
+  resolveTtsDrainWaiters();
+}
+
+function waitForTtsDrain() {
+  if (ttsInFlight === 0) return Promise.resolve();
+  return new Promise((resolve) => ttsDrainResolvers.push(resolve));
+}
+
 function sendSentenceToTts(sentence) {
+  if (!sentence || sentence.trim().length === 0) return;
   if (!ttsWs) ttsWs = openTtsSocket();
   // Capture a local reference: the deferred 'open' callback may fire after
   // the module-global `ttsWs` has been cleared by post-turn cleanup, and
@@ -590,15 +629,28 @@ function sendSentenceToTts(sentence) {
     text: sentence,
     voice: el.voice.value,
   };
+  // Count this request as in-flight immediately, including the period while
+  // we are waiting for the socket to transition from CONNECTING to OPEN.
+  ttsInFlight += 1;
   const send = () => {
-    if (ws.readyState !== WebSocket.OPEN) return;
-    try { ws.send(JSON.stringify(payload)); }
-    catch (e) { console.warn('tts send failed', e); }
+    if (ws.readyState !== WebSocket.OPEN) {
+      settleOneTtsRequest();
+      return;
+    }
+    try {
+      ws.send(JSON.stringify(payload));
+    }
+    catch (e) {
+      console.warn('tts send failed', e);
+      settleOneTtsRequest();
+    }
   };
   if (ws.readyState === WebSocket.OPEN) {
     send();
   } else if (ws.readyState === WebSocket.CONNECTING) {
     ws.addEventListener('open', send, { once: true });
+  } else {
+    settleOneTtsRequest();
   }
 }
 
@@ -611,6 +663,7 @@ function cancelTts() {
     try { ttsWs.close(); } catch (_) { /* ignore */ }
     ttsWs = null;
   }
+  resetTtsDrainState();
   flushAudio();
 }
 
@@ -729,6 +782,10 @@ async function handleUserTurn(userText) {
   let textBuffer = '';
 
   // Start (or reuse) the TTS socket for this turn.
+  resetTtsDrainState();
+  if (ttsWs) {
+    try { ttsWs.close(); } catch (_) { /* ignore */ }
+  }
   ttsWs = openTtsSocket();
 
   const onToken = (delta) => {
@@ -770,14 +827,13 @@ async function handleUserTurn(userText) {
     textBuffer = '';
   }
 
-  // Close the TTS socket once the server has presumably finished
-  // consuming everything we pushed. We keep it open briefly so
-  // in-flight synthesis can still stream audio frames back.
-  const socketToClose = ttsWs;
-  ttsWs = null;
-  setTimeout(() => {
-    try { socketToClose?.close(); } catch (_) { /* ignore */ }
-  }, 500);
+  // Wait until all sentence-level TTS requests receive terminal server
+  // responses before closing the socket.
+  await waitForTtsDrain();
+  if (ttsWs) {
+    try { ttsWs.close(); } catch (_) { /* ignore */ }
+    ttsWs = null;
+  }
 
   // Record the completed assistant turn in history.
   if (fullText) {
