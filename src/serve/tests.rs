@@ -243,6 +243,8 @@ async fn demo_returns_html_page() {
     assert!(!body.contains("socketToClose?.close"));
     // Regression: strip model `<think>` blocks before rendering/TTS.
     assert!(body.contains("stripThinkingBlocks"));
+    // Regression: keep speaking-stage barge-in from echo-looping.
+    assert!(body.contains("isLikelyAssistantEcho"));
 }
 
 // ---------------------------------------------------------------------------

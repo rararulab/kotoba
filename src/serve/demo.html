@@ -336,6 +336,8 @@ const HISTORY_MAX = 10;
 /** The SpeechRecognition instance. Recreated per listening session
  *  because some browsers don't cleanly reuse it after errors. */
 let recognition = null;
+/** Whether recognition auto-restart is currently desired. */
+let recognitionShouldRun = false;
 
 /** AbortController for the in-flight LLM fetch, so user interruptions
  *  can cancel it immediately. */
@@ -370,6 +372,13 @@ let currentAssistantEl = null;
 let interimEl = null;
 /** Monotonic turn id used to invalidate stale async turn continuations. */
 let activeTurnId = 0;
+/** Assistant text visible to the user in the current turn, used for
+ *  echo-guard heuristics during barge-in detection. */
+let currentAssistantText = '';
+/** Timestamp when we entered speaking state for the current turn. */
+let speakingStartedAtMs = 0;
+/** Timestamp when assistant playback finished in the previous turn. */
+let lastAssistantFinishedAtMs = 0;
 
 // ---------------------------------------------------------------------------
 // UI helpers
@@ -700,6 +709,24 @@ function stripThinkingBlocks(text) {
   return text.replace(/<think\b[^>]*>[\s\S]*?(?:<\/think>|$)/gi, '');
 }
 
+// Normalize text for fuzzy echo comparison between what the assistant just
+// said and what SpeechRecognition captured while speaking.
+function normalizeForEchoCompare(text) {
+  return text
+    .toLowerCase()
+    .replace(/[\s\u3000]/g, '')
+    .replace(/[，。！？、,.!?:;"'“”‘’（）()\-]/g, '');
+}
+
+// Heuristic: if the recognized fragment is mostly contained in the current
+// assistant reply, it's likely speaker echo rather than a real interruption.
+function isLikelyAssistantEcho(recognizedText) {
+  const heard = normalizeForEchoCompare(recognizedText);
+  const spoken = normalizeForEchoCompare(currentAssistantText);
+  if (!heard || heard.length < 2 || !spoken) return false;
+  return spoken.includes(heard);
+}
+
 // ---------------------------------------------------------------------------
 // LLM streaming
 // ---------------------------------------------------------------------------
@@ -793,6 +820,7 @@ async function handleUserTurn(userText) {
   // stream and derive the visible/speakable text incrementally.
   let rawText = '';
   let visibleText = '';
+  currentAssistantText = '';
 
   // Start (or reuse) the TTS socket for this turn.
   resetTtsDrainState();
@@ -812,9 +840,12 @@ async function handleUserTurn(userText) {
     // First visible token = transition to speaking and arm barge-in.
     if (state === State.THINKING) {
       setState(State.SPEAKING, 'speaking…');
+      speakingStartedAtMs = Date.now();
+      recognitionShouldRun = true;
       startRecognition();
     }
     currentAssistantEl.textContent += visibleDelta;
+    currentAssistantText += visibleDelta;
     el.conversation.scrollTop = el.conversation.scrollHeight;
 
     textBuffer += visibleDelta;
@@ -839,8 +870,11 @@ async function handleUserTurn(userText) {
     showBanner('LLM unreachable, using echo mode');
     fullText = `「${userText}」と聞きました。`;
     currentAssistantEl.textContent = fullText;
+    currentAssistantText = fullText;
     textBuffer = fullText;
     setState(State.SPEAKING, 'speaking…');
+    speakingStartedAtMs = Date.now();
+    recognitionShouldRun = true;
     startRecognition();
   }
 
@@ -870,9 +904,11 @@ async function handleUserTurn(userText) {
   // has no single "all done" event across multiple buffers.
   await waitForPlaybackToDrain();
   if (turnId !== activeTurnId || !running) return;
+  lastAssistantFinishedAtMs = Date.now();
 
   if (running) {
     setState(State.LISTENING, 'listening…');
+    recognitionShouldRun = true;
     startRecognition();
   }
 }
@@ -928,11 +964,8 @@ function buildRecognition() {
   };
 
   rec.onspeechstart = () => {
-    // Barge-in: if the assistant is currently talking, cut it off.
-    if (state === State.SPEAKING) {
-      interrupt();
-      setState(State.LISTENING, 'listening… (interrupted)');
-    }
+    // We do not interrupt immediately on speechstart because speaker echo
+    // can trigger false positives. Interruption is confirmed on final text.
   };
 
   rec.onresult = (ev) => {
@@ -944,15 +977,25 @@ function buildRecognition() {
       else interim += res[0].transcript;
     }
     if (interim) showInterim(interim);
-    if (finalText.trim()) {
-      // Some engines may deliver final text without firing `onspeechstart`.
+    const final = finalText.trim();
+    if (final) {
       if (state === State.SPEAKING) {
+        // Guard against echo loops: assistant audio can be picked up by the
+        // microphone and re-recognized as user speech.
+        if (isLikelyAssistantEcho(final)) return;
+        // Ignore ultra-early short fragments right after speaking starts.
+        const speakingMs = Date.now() - speakingStartedAtMs;
+        if (speakingMs < 350 && final.length < 4) return;
         interrupt();
         setState(State.LISTENING, 'listening… (interrupted)');
+      } else if (state === State.LISTENING) {
+        // Ignore echoes of assistant text that leak into recognition.
+        if (isLikelyAssistantEcho(final)) return;
       }
       clearInterim();
+      recognitionShouldRun = false;
       stopRecognition();
-      handleUserTurn(finalText.trim()).catch((e) => console.error(e));
+      handleUserTurn(final).catch((e) => console.error(e));
     }
   };
 
@@ -965,7 +1008,11 @@ function buildRecognition() {
 
   rec.onend = () => {
     // Auto-restart while active so barge-in keeps working during speaking.
-    if (running && (state === State.LISTENING || state === State.SPEAKING)) {
+    if (
+      running &&
+      recognitionShouldRun &&
+      (state === State.LISTENING || state === State.SPEAKING)
+    ) {
       try { rec.start(); }
       catch (_) { /* start() throws if already started */ }
     }
@@ -1012,11 +1059,13 @@ el.startBtn.addEventListener('click', async () => {
   el.startBtn.disabled = true;
   el.stopBtn.disabled = false;
   setState(State.LISTENING, 'listening…');
+  recognitionShouldRun = true;
   startRecognition();
 });
 
 el.stopBtn.addEventListener('click', () => {
   running = false;
+  recognitionShouldRun = false;
   interrupt();
   stopRecognition();
   recognition = null;
