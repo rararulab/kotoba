@@ -14,7 +14,7 @@ clap = { version = "4", features = ["derive"] }
 config = "0.15"
 dirs = "6"
 futures-util = "0.3"
-indicatif = "0.17"
+indicatif = "0.18"
 reqwest = { version = "0.13", features = ["json", "multipart", "query", "stream"] }
 rodio = "0.22"
 serde = { version = "1", features = ["derive"] }
