@@ -187,6 +187,15 @@ pub enum Command {
     },
     /// Initialize the database (without full setup)
     Init,
+    /// Start an OpenAI-compatible TTS API server
+    Serve {
+        /// Host address to bind to
+        #[arg(long, default_value = "127.0.0.1")]
+        host: String,
+        /// Port to listen on
+        #[arg(long, default_value_t = 8080)]
+        port: u16,
+    },
     /// Manage config values
     Config {
         #[command(subcommand)]
