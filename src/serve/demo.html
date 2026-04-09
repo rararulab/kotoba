@@ -195,10 +195,16 @@
       <summary>Settings</summary>
       <div class="settings-grid">
         <label for="llm-url">LLM URL</label>
-        <input type="text" id="llm-url" value="http://localhost:11434/v1">
+        <input type="text" id="llm-url" value="http://localhost:11434/v1"
+               placeholder="https://api.openai.com/v1">
+
+        <label for="llm-key">API Key</label>
+        <input type="password" id="llm-key" value=""
+               placeholder="sk-... (optional, stored in localStorage)">
 
         <label for="llm-model">Model</label>
-        <input type="text" id="llm-model" value="qwen2.5:7b">
+        <input type="text" id="llm-model" value="qwen2.5:7b"
+               placeholder="gpt-4o-mini, qwen2.5:7b, ...">
 
         <label for="voice">Voice</label>
         <select id="voice"></select>
@@ -266,9 +272,26 @@ const el = {
   banner:      $('banner'),
   voice:       $('voice'),
   llmUrl:      $('llm-url'),
+  llmKey:      $('llm-key'),
   llmModel:    $('llm-model'),
   systemPrompt:$('system-prompt'),
 };
+
+// Persist sensitive settings (URL, API key, model) in localStorage so users
+// don't have to re-enter them on every page load.
+const STORAGE_KEYS = {
+  llmUrl:       'kotoba.demo.llmUrl',
+  llmKey:       'kotoba.demo.llmKey',
+  llmModel:     'kotoba.demo.llmModel',
+  systemPrompt: 'kotoba.demo.systemPrompt',
+};
+for (const [field, key] of Object.entries(STORAGE_KEYS)) {
+  const stored = localStorage.getItem(key);
+  if (stored !== null && el[field]) el[field].value = stored;
+  if (el[field]) el[field].addEventListener('change', () => {
+    localStorage.setItem(key, el[field].value);
+  });
+}
 
 // ---------------------------------------------------------------------------
 // State
@@ -558,9 +581,15 @@ async function streamLlm(userText, onToken) {
     { role: 'user', content: userText },
   ];
 
+  const headers = { 'Content-Type': 'application/json' };
+  const apiKey = el.llmKey.value.trim();
+  if (apiKey) {
+    headers['Authorization'] = `Bearer ${apiKey}`;
+  }
+
   const resp = await fetch(`${el.llmUrl.value.replace(/\/+$/, '')}/chat/completions`, {
     method:  'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers,
     body:    JSON.stringify({
       model:   el.llmModel.value,
       messages,
