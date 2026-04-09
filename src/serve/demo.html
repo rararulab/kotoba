@@ -482,6 +482,9 @@ function syncVoiceToLanguage() {
 // Audio playback
 // ---------------------------------------------------------------------------
 
+// Create or return the AudioContext. Browsers create it in `suspended`
+// state until a user gesture; callers must `await resumeAudioCtx()` from
+// inside a click handler to actually unlock it.
 function ensureAudioCtx() {
   if (!audioCtx) {
     audioCtx = new (window.AudioContext || window.webkitAudioContext)();
@@ -489,9 +492,21 @@ function ensureAudioCtx() {
   return audioCtx;
 }
 
+// Resume the AudioContext if it's suspended. Safe to call repeatedly.
+async function resumeAudioCtx() {
+  const ctx = ensureAudioCtx();
+  if (ctx.state === 'suspended') {
+    try { await ctx.resume(); }
+    catch (e) { console.error('audio resume failed', e); }
+  }
+  return ctx;
+}
+
 async function enqueueAudio(bytes) {
   try {
-    const ctx = ensureAudioCtx();
+    // Safari can re-suspend the context between user gesture and playback,
+    // so defensively resume before decoding.
+    const ctx = await resumeAudioCtx();
     // decodeAudioData mutates the ArrayBuffer; slice to be safe.
     const buffer = await ctx.decodeAudioData(bytes.slice(0));
     playQueue.push(buffer);
@@ -888,11 +903,14 @@ function stopRecognition() {
 // Start / Stop
 // ---------------------------------------------------------------------------
 
-el.startBtn.addEventListener('click', () => {
+el.startBtn.addEventListener('click', async () => {
   if (running) return;
   running = true;
   hideBanner();
-  ensureAudioCtx(); // unlock Web Audio via user gesture
+  // Unlock Web Audio via the click user gesture. Must await — creating
+  // the context isn't enough; modern browsers require an explicit resume
+  // before any audio will play.
+  await resumeAudioCtx();
   el.startBtn.disabled = true;
   el.stopBtn.disabled = false;
   setState(State.LISTENING, 'listening…');
