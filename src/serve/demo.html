@@ -3,156 +3,508 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>kotoba TTS — streaming demo</title>
+<title>kotoba TTS — voice chat demo</title>
 <style>
   :root {
     --bg: #0f1115;
     --panel: #1a1d24;
+    --panel-2: #222632;
     --border: #2a2f3a;
     --text: #e6e8ec;
     --muted: #8a8f99;
     --accent: #7c5cff;
     --accent-hover: #9277ff;
     --danger: #ef4444;
+    --warning: #f59e0b;
     --success: #10b981;
+    --blue: #3b82f6;
+    --purple: #a855f7;
   }
   * { box-sizing: border-box; }
-  html, body { margin: 0; padding: 0; background: var(--bg); color: var(--text); font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif; }
-  .container { max-width: 720px; margin: 60px auto; padding: 0 20px; }
-  h1 { font-size: 28px; font-weight: 600; margin: 0 0 8px; letter-spacing: -0.02em; }
-  .subtitle { color: var(--muted); font-size: 14px; margin-bottom: 32px; }
-  .panel { background: var(--panel); border: 1px solid var(--border); border-radius: 12px; padding: 24px; }
-  .row { display: flex; gap: 12px; align-items: center; margin-bottom: 16px; }
-  label { display: block; font-size: 13px; color: var(--muted); margin-bottom: 8px; font-weight: 500; }
-  textarea, select, button {
-    font-family: inherit; font-size: 14px; color: var(--text);
-    background: var(--bg); border: 1px solid var(--border); border-radius: 8px;
-    padding: 12px 14px; outline: none;
+  html, body {
+    margin: 0; padding: 0;
+    background: var(--bg); color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+    height: 100%;
   }
-  textarea { width: 100%; min-height: 100px; resize: vertical; line-height: 1.5; }
-  textarea:focus, select:focus { border-color: var(--accent); }
-  select { width: 100%; cursor: pointer; appearance: none; background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath fill='%238a8f99' d='M6 8L2 4h8z'/%3E%3C/svg%3E"); background-repeat: no-repeat; background-position: right 14px center; padding-right: 36px; }
+  .container {
+    max-width: 760px;
+    margin: 40px auto;
+    padding: 0 20px 60px;
+  }
+  h1 {
+    font-size: 28px; font-weight: 600;
+    margin: 0 0 4px; letter-spacing: -0.02em;
+  }
+  .subtitle { color: var(--muted); font-size: 14px; margin-bottom: 24px; }
+
+  .panel {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 20px;
+    margin-bottom: 16px;
+  }
+
+  /* ---- Settings ---- */
+  details.settings { cursor: pointer; }
+  details.settings summary {
+    font-size: 14px; font-weight: 500; color: var(--muted);
+    list-style: none; user-select: none;
+    display: flex; align-items: center; gap: 8px;
+  }
+  details.settings summary::before {
+    content: "▸"; display: inline-block;
+    transition: transform 0.15s;
+  }
+  details.settings[open] summary::before { transform: rotate(90deg); }
+  .settings-grid {
+    margin-top: 16px;
+    display: grid;
+    grid-template-columns: 120px 1fr;
+    gap: 10px 12px;
+    align-items: center;
+  }
+  .settings-grid label {
+    font-size: 12px; color: var(--muted);
+    text-align: right;
+  }
+  input[type="text"], input[type="password"], select, .settings-grid textarea {
+    font-family: inherit; font-size: 13px; color: var(--text);
+    background: var(--bg); border: 1px solid var(--border); border-radius: 6px;
+    padding: 8px 10px; outline: none; width: 100%;
+  }
+  .settings-grid textarea { resize: vertical; line-height: 1.4; min-height: 36px; }
+  input[type="text"]:focus, input[type="password"]:focus,
+  select:focus, .settings-grid textarea:focus { border-color: var(--accent); }
+  select {
+    cursor: pointer; appearance: none;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath fill='%238a8f99' d='M6 8L2 4h8z'/%3E%3C/svg%3E");
+    background-repeat: no-repeat;
+    background-position: right 10px center;
+    padding-right: 30px;
+  }
+
+  /* ---- Conversation ---- */
+  .conversation {
+    min-height: 240px;
+    max-height: 440px;
+    overflow-y: auto;
+    padding: 4px 4px 8px;
+    display: flex; flex-direction: column; gap: 12px;
+  }
+  .conversation:empty::before {
+    content: "Press Start to begin the conversation.";
+    color: var(--muted); font-size: 13px; font-style: italic;
+    align-self: center; margin-top: 80px;
+  }
+  .msg {
+    max-width: 80%;
+    padding: 10px 14px;
+    border-radius: 12px;
+    font-size: 14px;
+    line-height: 1.5;
+    white-space: pre-wrap;
+    word-wrap: break-word;
+  }
+  .msg.user {
+    align-self: flex-start;
+    background: var(--panel-2);
+    color: var(--text);
+    border-bottom-left-radius: 4px;
+  }
+  .msg.assistant {
+    align-self: flex-end;
+    background: var(--accent);
+    color: white;
+    border-bottom-right-radius: 4px;
+  }
+  .msg .role {
+    font-size: 11px; opacity: 0.7;
+    margin-bottom: 4px; font-weight: 500;
+  }
+
+  /* Interim preview of user speech while listening */
+  .interim {
+    align-self: flex-start;
+    background: transparent;
+    color: var(--muted);
+    border: 1px dashed var(--border);
+    font-style: italic;
+  }
+
+  /* ---- Status ---- */
+  .status-bar {
+    display: flex; align-items: center; gap: 10px;
+    margin-bottom: 16px;
+    font-size: 13px;
+    color: var(--muted);
+  }
+  .dot {
+    width: 10px; height: 10px; border-radius: 50%;
+    background: var(--muted);
+    flex-shrink: 0;
+  }
+  .dot.listening { background: var(--success); animation: pulse 1.2s infinite; }
+  .dot.thinking  { background: var(--blue);    animation: pulse 1.2s infinite; }
+  .dot.speaking  { background: var(--purple);  animation: pulse 1.2s infinite; }
+  @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.35; } }
+
+  /* ---- Controls ---- */
+  .controls { display: flex; gap: 10px; }
   button {
-    cursor: pointer; font-weight: 500; transition: all 0.15s;
+    font-family: inherit; font-size: 14px; font-weight: 500;
+    cursor: pointer; transition: all 0.15s;
     border: none; padding: 12px 20px;
+    border-radius: 8px;
   }
   button.primary { background: var(--accent); color: white; flex: 1; }
   button.primary:hover:not(:disabled) { background: var(--accent-hover); }
-  button.danger { background: transparent; color: var(--danger); border: 1px solid var(--danger); }
+  button.danger {
+    background: transparent; color: var(--danger);
+    border: 1px solid var(--danger); flex: 1;
+  }
   button.danger:hover:not(:disabled) { background: rgba(239, 68, 68, 0.1); }
   button:disabled { opacity: 0.4; cursor: not-allowed; }
-  .status {
-    margin-top: 20px; padding: 16px; background: var(--bg); border-radius: 8px;
-    border: 1px solid var(--border); font-family: ui-monospace, SFMono-Regular, monospace; font-size: 12px;
-    min-height: 60px;
+
+  /* ---- Warning banner ---- */
+  .banner {
+    display: none;
+    margin-bottom: 16px;
+    padding: 10px 14px;
+    background: rgba(245, 158, 11, 0.1);
+    border: 1px solid var(--warning);
+    border-radius: 8px;
+    color: var(--warning);
+    font-size: 13px;
   }
-  .status-line { display: flex; gap: 8px; align-items: center; margin-bottom: 4px; }
-  .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--muted); }
-  .dot.connected { background: var(--success); }
-  .dot.busy { background: var(--accent); animation: pulse 1s infinite; }
-  .dot.error { background: var(--danger); }
-  @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.4; } }
-  .chunks { display: flex; gap: 4px; margin-top: 12px; flex-wrap: wrap; }
-  .chunk-pill { padding: 4px 10px; background: var(--accent); color: white; border-radius: 4px; font-size: 11px; font-weight: 500; opacity: 0; transform: translateY(4px); animation: pop 0.3s forwards; }
-  @keyframes pop { to { opacity: 1; transform: translateY(0); } }
+  .banner.visible { display: block; }
+
   .footer { margin-top: 24px; text-align: center; color: var(--muted); font-size: 12px; }
   a { color: var(--accent); text-decoration: none; }
   a:hover { text-decoration: underline; }
+  code { font-family: ui-monospace, SFMono-Regular, monospace; font-size: 11px; }
 </style>
 </head>
 <body>
 <div class="container">
-  <h1>kotoba TTS</h1>
-  <div class="subtitle">Streaming WebSocket synthesis demo</div>
+  <h1>kotoba — voice chat</h1>
+  <div class="subtitle">Real-time multilingual voice conversation · STT → LLM → streaming TTS</div>
 
+  <!-- Settings panel -->
   <div class="panel">
-    <label for="text">Text</label>
-    <textarea id="text" placeholder="入力してください…">こんにちは、世界！今日はいい天気ですね。お元気ですか？</textarea>
+    <details class="settings">
+      <summary>Settings</summary>
+      <div class="settings-grid">
+        <label for="llm-url">LLM URL</label>
+        <input type="text" id="llm-url" value="http://localhost:11434/v1"
+               placeholder="https://api.openai.com/v1">
 
-    <div style="margin-top: 16px;">
-      <label for="voice">Voice</label>
-      <select id="voice"></select>
-    </div>
+        <label for="llm-key">API Key</label>
+        <input type="password" id="llm-key" value=""
+               placeholder="sk-... (optional, stored in localStorage)">
 
-    <div class="row" style="margin-top: 20px; margin-bottom: 0;">
-      <button id="speak" class="primary">Speak</button>
-      <button id="cancel" class="danger" disabled>Cancel</button>
-    </div>
+        <label for="llm-model">Model</label>
+        <input type="text" id="llm-model" value="qwen2.5:7b"
+               placeholder="gpt-4o-mini, qwen2.5:7b, ...">
 
-    <div class="status">
-      <div class="status-line">
-        <div class="dot" id="dot"></div>
-        <span id="status-text">idle</span>
+        <label for="lang">Language</label>
+        <select id="lang">
+          <option value="ja-JP">日本語 (ja-JP)</option>
+          <option value="zh-CN">中文 (zh-CN)</option>
+          <option value="zh-TW">中文繁體 (zh-TW)</option>
+          <option value="en-US">English (en-US)</option>
+        </select>
+
+        <label for="voice">Voice</label>
+        <select id="voice"></select>
+
+        <label for="system-prompt">System</label>
+        <textarea id="system-prompt" rows="2"
+          >You are a friendly conversation partner. Reply in the same language as the user, and keep responses short and natural.</textarea>
       </div>
-      <div class="chunks" id="chunks"></div>
+    </details>
+  </div>
+
+  <!-- Warning banner (e.g. LLM unreachable, STT unsupported) -->
+  <div class="banner" id="banner"></div>
+
+  <!-- Conversation panel -->
+  <div class="panel">
+    <div class="conversation" id="conversation"></div>
+  </div>
+
+  <!-- Status + controls -->
+  <div class="panel">
+    <div class="status-bar">
+      <div class="dot" id="dot"></div>
+      <span id="status-text">idle</span>
+    </div>
+    <div class="controls">
+      <button id="start" class="primary">Start Conversation</button>
+      <button id="stop" class="danger" disabled>Stop</button>
     </div>
   </div>
 
   <div class="footer">
-    <code>WS /ws/tts</code> · <a href="https://github.com/rararulab/kotoba">github.com/rararulab/kotoba</a>
+    <code>WS /ws/tts</code> · <code>POST /v1/chat/completions</code> ·
+    <a href="https://github.com/rararulab/kotoba">github.com/rararulab/kotoba</a>
   </div>
 </div>
 
 <script>
-const $ = id => document.getElementById(id);
-const dot = $('dot'), statusText = $('status-text'), chunks = $('chunks');
-const speakBtn = $('speak'), cancelBtn = $('cancel');
-const textInput = $('text'), voiceSelect = $('voice');
+// ============================================================================
+// kotoba voice chat demo
+//
+// Pipeline: browser SpeechRecognition (STT) -> OpenAI-compatible LLM
+//           -> sentence buffer -> /ws/tts WebSocket -> Web Audio playback.
+//
+// Key design points:
+// - Interruption: if the user starts talking while the assistant is
+//   speaking, we cancel TTS, abort the LLM fetch, and flush the audio queue.
+// - One persistent /ws/tts socket per LLM response, so we avoid
+//   reconnect latency between sentences.
+// - Sentences are split on Japanese punctuation (。！？) and newlines
+//   as tokens stream in, so the first sentence can be spoken before
+//   the LLM has finished generating.
+// - If the LLM endpoint is unreachable, we fall back to an "echo mode"
+//   so the end-to-end voice loop still works without any local LLM.
+// ============================================================================
 
-let ws = null;
+const $ = (id) => document.getElementById(id);
+
+const el = {
+  dot:         $('dot'),
+  statusText:  $('status-text'),
+  startBtn:    $('start'),
+  stopBtn:     $('stop'),
+  conversation:$('conversation'),
+  banner:      $('banner'),
+  voice:       $('voice'),
+  llmUrl:      $('llm-url'),
+  llmKey:      $('llm-key'),
+  llmModel:    $('llm-model'),
+  lang:        $('lang'),
+  systemPrompt:$('system-prompt'),
+};
+
+// Persist sensitive settings (URL, API key, model) in localStorage so users
+// don't have to re-enter them on every page load.
+const STORAGE_KEYS = {
+  llmUrl:       'kotoba.demo.llmUrl',
+  llmKey:       'kotoba.demo.llmKey',
+  llmModel:     'kotoba.demo.llmModel',
+  lang:         'kotoba.demo.lang',
+  systemPrompt: 'kotoba.demo.systemPrompt',
+};
+for (const [field, key] of Object.entries(STORAGE_KEYS)) {
+  const stored = localStorage.getItem(key);
+  if (stored !== null && el[field]) el[field].value = stored;
+  if (el[field]) el[field].addEventListener('change', () => {
+    localStorage.setItem(key, el[field].value);
+  });
+}
+
+// ---------------------------------------------------------------------------
+// State
+// ---------------------------------------------------------------------------
+
+/** Finite state machine states for the conversation loop. */
+const State = Object.freeze({
+  IDLE:      'idle',
+  LISTENING: 'listening',
+  THINKING:  'thinking',
+  SPEAKING:  'speaking',
+});
+
+let state = State.IDLE;
+
+/** Whether the user has pressed "Start Conversation". When false,
+ *  any `recognition.onend` event terminates the loop instead of
+ *  auto-restarting. */
+let running = false;
+
+/** Rolling chat history (user + assistant turns), capped at 10 entries
+ *  so we don't let prompts grow without bound. */
+const history = [];
+const HISTORY_MAX = 10;
+
+/** The SpeechRecognition instance. Recreated per listening session
+ *  because some browsers don't cleanly reuse it after errors. */
+let recognition = null;
+
+/** AbortController for the in-flight LLM fetch, so user interruptions
+ *  can cancel it immediately. */
+let llmAbort = null;
+
+/** The persistent TTS WebSocket for the current assistant turn. */
+let ttsWs = null;
+
+/** Web Audio context (lazy-created on first user gesture so Safari
+ *  doesn't block it). */
 let audioCtx = null;
-let playQueue = [];
-let isPlaying = false;
-let chunkCount = 0;
 
-// Load available voices
+/** Decoded AudioBuffers waiting to be played in order. */
+let playQueue = [];
+
+/** The currently playing AudioBufferSourceNode, kept so we can stop
+ *  it on interruption. */
+let currentSource = null;
+let isPlaying = false;
+
+/** The DOM element for the currently streaming assistant message,
+ *  so we can append tokens as they arrive. */
+let currentAssistantEl = null;
+
+/** The DOM element that previews interim (not-yet-final) STT text. */
+let interimEl = null;
+
+// ---------------------------------------------------------------------------
+// UI helpers
+// ---------------------------------------------------------------------------
+
+function setState(next, text) {
+  state = next;
+  el.dot.className = 'dot ' + (next === State.IDLE ? '' : next);
+  el.statusText.textContent = text || next;
+}
+
+function showBanner(message) {
+  el.banner.textContent = message;
+  el.banner.classList.add('visible');
+}
+
+function hideBanner() {
+  el.banner.classList.remove('visible');
+}
+
+function appendMessage(role, text) {
+  const div = document.createElement('div');
+  div.className = 'msg ' + role;
+  const roleLabel = document.createElement('div');
+  roleLabel.className = 'role';
+  roleLabel.textContent = role === 'user' ? '👤 ユーザー' : '🤖 アシスタント';
+  const body = document.createElement('div');
+  body.textContent = text;
+  div.appendChild(roleLabel);
+  div.appendChild(body);
+  el.conversation.appendChild(div);
+  el.conversation.scrollTop = el.conversation.scrollHeight;
+  return body;
+}
+
+function showInterim(text) {
+  if (!interimEl) {
+    const div = document.createElement('div');
+    div.className = 'msg interim';
+    const roleLabel = document.createElement('div');
+    roleLabel.className = 'role';
+    roleLabel.textContent = '👤 ユーザー (speaking…)';
+    const body = document.createElement('div');
+    div.appendChild(roleLabel);
+    div.appendChild(body);
+    el.conversation.appendChild(div);
+    interimEl = { wrap: div, body };
+  }
+  interimEl.body.textContent = text;
+  el.conversation.scrollTop = el.conversation.scrollHeight;
+}
+
+function clearInterim() {
+  if (interimEl) {
+    interimEl.wrap.remove();
+    interimEl = null;
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Voices
+// ---------------------------------------------------------------------------
+
+// Map a UI language code to the Kokoro voice prefix that best matches it.
+// Kokoro v1.0 uses single-letter prefixes: a/b = English, j = Japanese,
+// z = Mandarin Chinese, etc.
+function preferredKokoroPrefixForLang(lang) {
+  if (lang.startsWith('zh')) return 'z';
+  if (lang.startsWith('ja')) return 'j';
+  if (lang.startsWith('en')) return 'a';
+  return null;
+}
+
+// Pick a sensible default voice for the currently selected language.
+function pickDefaultVoiceForLang(lang) {
+  const prefix = preferredKokoroPrefixForLang(lang);
+  if (!prefix) return null;
+  for (const opt of el.voice.options) {
+    const id = opt.value;
+    // strip "kokoro:" prefix if present
+    const name = id.startsWith('kokoro:') ? id.slice(7) : id;
+    if (name.startsWith(prefix)) return id;
+  }
+  return null;
+}
+
 async function loadVoices() {
   try {
     const r = await fetch('/v1/voices');
     const data = await r.json();
-    voiceSelect.innerHTML = '';
-    if (data.voices.length === 0) {
-      voiceSelect.innerHTML = '<option value="kokoro:jf_alpha">kokoro:jf_alpha (default)</option>';
+    el.voice.innerHTML = '';
+    if (!data.voices || data.voices.length === 0) {
+      el.voice.innerHTML = '<option value="kokoro:jf_alpha">kokoro:jf_alpha (default)</option>';
       return;
     }
     for (const v of data.voices) {
       const opt = document.createElement('option');
       opt.value = v.id;
       opt.textContent = `${v.id} — ${v.name}`;
-      voiceSelect.appendChild(opt);
+      el.voice.appendChild(opt);
     }
+    // Auto-select a voice that matches the currently chosen language.
+    const def = pickDefaultVoiceForLang(el.lang.value);
+    if (def) el.voice.value = def;
   } catch (e) {
-    voiceSelect.innerHTML = '<option value="kokoro:jf_alpha">kokoro:jf_alpha (default)</option>';
+    el.voice.innerHTML = '<option value="kokoro:jf_alpha">kokoro:jf_alpha (default)</option>';
   }
 }
 
-function setStatus(state, text) {
-  dot.className = 'dot ' + state;
-  statusText.textContent = text;
+// When the user changes language, snap voice to a matching language voice
+// (only if their current voice is from a different language family).
+function syncVoiceToLanguage() {
+  const currentPrefix = el.voice.value.replace(/^kokoro:/, '').charAt(0);
+  const desiredPrefix = preferredKokoroPrefixForLang(el.lang.value);
+  if (desiredPrefix && currentPrefix !== desiredPrefix) {
+    const match = pickDefaultVoiceForLang(el.lang.value);
+    if (match) el.voice.value = match;
+  }
 }
 
-function reset() {
-  chunkCount = 0;
-  chunks.innerHTML = '';
-  playQueue = [];
-  isPlaying = false;
+// ---------------------------------------------------------------------------
+// Audio playback
+// ---------------------------------------------------------------------------
+
+function ensureAudioCtx() {
+  if (!audioCtx) {
+    audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+  }
+  return audioCtx;
 }
 
-// Decode WAV bytes (simple PCM 16-bit) into AudioBuffer for playback.
-async function decodeAndPlay(bytes) {
-  if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+async function enqueueAudio(bytes) {
   try {
-    const buffer = await audioCtx.decodeAudioData(bytes.slice(0));
+    const ctx = ensureAudioCtx();
+    // decodeAudioData mutates the ArrayBuffer; slice to be safe.
+    const buffer = await ctx.decodeAudioData(bytes.slice(0));
     playQueue.push(buffer);
     if (!isPlaying) playNext();
   } catch (e) {
-    console.error('decode error', e);
+    console.error('audio decode failed', e);
   }
 }
 
 function playNext() {
   if (playQueue.length === 0) {
     isPlaying = false;
+    currentSource = null;
     return;
   }
   isPlaying = true;
@@ -160,92 +512,413 @@ function playNext() {
   const src = audioCtx.createBufferSource();
   src.buffer = buffer;
   src.connect(audioCtx.destination);
-  src.onended = playNext;
+  src.onended = () => {
+    if (currentSource === src) currentSource = null;
+    playNext();
+  };
+  currentSource = src;
   src.start();
 }
 
-speakBtn.addEventListener('click', () => {
-  const text = textInput.value.trim();
-  if (!text) return;
-  if (ws) ws.close();
+function flushAudio() {
+  playQueue = [];
+  if (currentSource) {
+    try { currentSource.onended = null; currentSource.stop(); }
+    catch (_) { /* already stopped */ }
+    currentSource = null;
+  }
+  isPlaying = false;
+}
 
-  reset();
-  speakBtn.disabled = true;
-  cancelBtn.disabled = false;
-  setStatus('busy', 'connecting…');
+// ---------------------------------------------------------------------------
+// TTS WebSocket
+// ---------------------------------------------------------------------------
 
+function openTtsSocket() {
   const proto = location.protocol === 'https:' ? 'wss' : 'ws';
-  ws = new WebSocket(`${proto}://${location.host}/ws/tts`);
+  const ws = new WebSocket(`${proto}://${location.host}/ws/tts`);
   ws.binaryType = 'arraybuffer';
-
-  ws.addEventListener('open', () => {
-    setStatus('connected', 'synthesizing…');
-    ws.send(JSON.stringify({
-      type: 'tts',
-      text,
-      voice: voiceSelect.value,
-    }));
-  });
 
   ws.addEventListener('message', async (ev) => {
     if (ev.data instanceof ArrayBuffer) {
-      // Binary: audio chunk
-      await decodeAndPlay(ev.data);
-    } else {
-      // Text: control message
-      const msg = JSON.parse(ev.data);
-      if (msg.type === 'chunk') {
-        chunkCount++;
-        const pill = document.createElement('div');
-        pill.className = 'chunk-pill';
-        pill.textContent = `#${msg.index}`;
-        chunks.appendChild(pill);
-        setStatus('busy', `chunk ${chunkCount} received…`);
-      } else if (msg.type === 'done') {
-        setStatus('connected', `done — ${msg.chunks} chunks`);
-        speakBtn.disabled = false;
-        cancelBtn.disabled = true;
-        ws.close();
-        ws = null;
-      } else if (msg.type === 'cancelled') {
-        setStatus('connected', 'cancelled');
-        speakBtn.disabled = false;
-        cancelBtn.disabled = true;
-        ws.close();
-        ws = null;
-      } else if (msg.type === 'error') {
-        setStatus('error', `error: ${msg.message}`);
-        speakBtn.disabled = false;
-        cancelBtn.disabled = true;
-        ws.close();
-        ws = null;
-      }
+      await enqueueAudio(ev.data);
+      return;
     }
+    try {
+      const msg = JSON.parse(ev.data);
+      // chunk/done/cancelled/error — we only care about error for UI feedback.
+      if (msg.type === 'error') {
+        console.warn('tts error', msg.message);
+      }
+    } catch (_) { /* ignore non-JSON text */ }
   });
 
   ws.addEventListener('error', () => {
-    setStatus('error', 'connection error');
-    speakBtn.disabled = false;
-    cancelBtn.disabled = true;
+    console.warn('tts ws error');
   });
 
-  ws.addEventListener('close', () => {
-    if (speakBtn.disabled) {
-      // Closed mid-synthesis without done/error
-      setStatus('error', 'connection closed');
-      speakBtn.disabled = false;
-      cancelBtn.disabled = true;
+  return ws;
+}
+
+function sendSentenceToTts(sentence) {
+  if (!ttsWs) ttsWs = openTtsSocket();
+  const payload = {
+    type: 'tts',
+    text: sentence,
+    voice: el.voice.value,
+  };
+  const send = () => ttsWs.send(JSON.stringify(payload));
+  if (ttsWs.readyState === WebSocket.OPEN) {
+    send();
+  } else if (ttsWs.readyState === WebSocket.CONNECTING) {
+    ttsWs.addEventListener('open', send, { once: true });
+  }
+}
+
+function cancelTts() {
+  if (ttsWs && ttsWs.readyState === WebSocket.OPEN) {
+    try { ttsWs.send(JSON.stringify({ type: 'cancel' })); }
+    catch (_) { /* ignore */ }
+  }
+  if (ttsWs) {
+    try { ttsWs.close(); } catch (_) { /* ignore */ }
+    ttsWs = null;
+  }
+  flushAudio();
+}
+
+// ---------------------------------------------------------------------------
+// Sentence splitter
+//
+// Scans a running buffer for Japanese sentence terminators plus newlines,
+// emits each complete sentence, and returns the unflushed remainder. The
+// caller keeps the remainder and re-feeds it with the next token batch.
+// ---------------------------------------------------------------------------
+
+const SENTENCE_TERMINATORS = new Set(['。', '！', '？', '!', '?', '\n']);
+
+function extractSentences(buffer) {
+  const sentences = [];
+  let start = 0;
+  // Iterate by code units; sentence terminators are all BMP chars.
+  for (let i = 0; i < buffer.length; i++) {
+    if (SENTENCE_TERMINATORS.has(buffer[i])) {
+      const piece = buffer.slice(start, i + 1).trim();
+      if (piece.length > 0) sentences.push(piece);
+      start = i + 1;
     }
+  }
+  const remainder = buffer.slice(start);
+  return { sentences, remainder };
+}
+
+// ---------------------------------------------------------------------------
+// LLM streaming
+// ---------------------------------------------------------------------------
+
+/**
+ * Stream a completion from an OpenAI-compatible endpoint. Calls
+ * `onToken(text)` for each delta chunk. Returns the full assistant text,
+ * or throws on network / HTTP failure.
+ */
+async function streamLlm(userText, onToken) {
+  llmAbort = new AbortController();
+
+  const messages = [
+    { role: 'system', content: el.systemPrompt.value },
+    ...history,
+    { role: 'user', content: userText },
+  ];
+
+  const headers = { 'Content-Type': 'application/json' };
+  const apiKey = el.llmKey.value.trim();
+  if (apiKey) {
+    headers['Authorization'] = `Bearer ${apiKey}`;
+  }
+
+  const resp = await fetch(`${el.llmUrl.value.replace(/\/+$/, '')}/chat/completions`, {
+    method:  'POST',
+    headers,
+    body:    JSON.stringify({
+      model:   el.llmModel.value,
+      messages,
+      stream:  true,
+    }),
+    signal: llmAbort.signal,
   });
+
+  if (!resp.ok) {
+    throw new Error(`LLM HTTP ${resp.status}`);
+  }
+
+  const reader = resp.body.getReader();
+  const decoder = new TextDecoder();
+  let sseBuffer = '';
+  let full = '';
+
+  while (true) {
+    const { value, done } = await reader.read();
+    if (done) break;
+    sseBuffer += decoder.decode(value, { stream: true });
+
+    // SSE: events separated by \n\n, each line inside starts with `data: `.
+    let newlineIdx;
+    while ((newlineIdx = sseBuffer.indexOf('\n')) !== -1) {
+      const line = sseBuffer.slice(0, newlineIdx).trim();
+      sseBuffer = sseBuffer.slice(newlineIdx + 1);
+      if (!line.startsWith('data:')) continue;
+      const payload = line.slice(5).trim();
+      if (payload === '[DONE]') return full;
+      try {
+        const json = JSON.parse(payload);
+        const delta = json.choices?.[0]?.delta?.content || '';
+        if (delta) {
+          full += delta;
+          onToken(delta);
+        }
+      } catch (_) { /* partial json, skip */ }
+    }
+  }
+  return full;
+}
+
+// ---------------------------------------------------------------------------
+// Conversation turn: user text -> LLM (or echo) -> TTS
+// ---------------------------------------------------------------------------
+
+async function handleUserTurn(userText) {
+  if (!running) return;
+  setState(State.THINKING, 'thinking…');
+
+  // Push user message to history + UI.
+  history.push({ role: 'user', content: userText });
+  if (history.length > HISTORY_MAX) history.splice(0, history.length - HISTORY_MAX);
+  appendMessage('user', userText);
+
+  // Create assistant bubble to stream tokens into.
+  currentAssistantEl = appendMessage('assistant', '');
+
+  // Running buffer used by the sentence splitter.
+  let textBuffer = '';
+
+  // Start (or reuse) the TTS socket for this turn.
+  ttsWs = openTtsSocket();
+
+  const onToken = (delta) => {
+    if (!running) return;
+    // First token = transition to speaking as soon as we actually send audio.
+    if (state === State.THINKING) {
+      setState(State.SPEAKING, 'speaking…');
+    }
+    currentAssistantEl.textContent += delta;
+    el.conversation.scrollTop = el.conversation.scrollHeight;
+
+    textBuffer += delta;
+    const { sentences, remainder } = extractSentences(textBuffer);
+    textBuffer = remainder;
+    for (const s of sentences) sendSentenceToTts(s);
+  };
+
+  let fullText;
+  try {
+    fullText = await streamLlm(userText, onToken);
+    hideBanner();
+  } catch (err) {
+    if (err.name === 'AbortError') {
+      // User interrupted: the interruption path already cleaned up.
+      return;
+    }
+    // Fallback: echo mode.
+    console.warn('LLM unreachable, using echo mode:', err);
+    showBanner('LLM unreachable, using echo mode');
+    fullText = `「${userText}」と聞きました。`;
+    currentAssistantEl.textContent = fullText;
+    textBuffer = fullText;
+    setState(State.SPEAKING, 'speaking…');
+  }
+
+  // Flush any trailing partial sentence.
+  if (textBuffer.trim().length > 0) {
+    sendSentenceToTts(textBuffer.trim());
+    textBuffer = '';
+  }
+
+  // Close the TTS socket once the server has presumably finished
+  // consuming everything we pushed. We keep it open briefly so
+  // in-flight synthesis can still stream audio frames back.
+  const socketToClose = ttsWs;
+  ttsWs = null;
+  setTimeout(() => {
+    try { socketToClose?.close(); } catch (_) { /* ignore */ }
+  }, 500);
+
+  // Record the completed assistant turn in history.
+  if (fullText) {
+    history.push({ role: 'assistant', content: fullText });
+    if (history.length > HISTORY_MAX) history.splice(0, history.length - HISTORY_MAX);
+  }
+
+  // After the LLM finishes, wait for audio to drain before returning
+  // to listening. We poll the playback queue because AudioBuffer playback
+  // has no single "all done" event across multiple buffers.
+  await waitForPlaybackToDrain();
+
+  if (running) {
+    setState(State.LISTENING, 'listening…');
+    startRecognition();
+  }
+}
+
+function waitForPlaybackToDrain() {
+  return new Promise((resolve) => {
+    const tick = () => {
+      if (!running) return resolve();
+      if (!isPlaying && playQueue.length === 0) return resolve();
+      setTimeout(tick, 120);
+    };
+    tick();
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Interruption
+// ---------------------------------------------------------------------------
+
+function interrupt() {
+  // Stop any in-flight LLM fetch.
+  if (llmAbort) {
+    try { llmAbort.abort(); } catch (_) { /* ignore */ }
+    llmAbort = null;
+  }
+  // Cancel TTS and flush audio.
+  cancelTts();
+  // Drop the current assistant bubble reference; what was typed stays on
+  // screen as a partial reply.
+  currentAssistantEl = null;
+}
+
+// ---------------------------------------------------------------------------
+// Speech recognition
+// ---------------------------------------------------------------------------
+
+function buildRecognition() {
+  const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+  if (!SR) {
+    showBanner('SpeechRecognition API not supported in this browser (try Chrome).');
+    return null;
+  }
+  const rec = new SR();
+  rec.lang = el.lang.value || 'ja-JP';
+  rec.continuous = true;
+  rec.interimResults = true;
+
+  rec.onstart = () => {
+    if (state === State.IDLE || state === State.THINKING) {
+      setState(State.LISTENING, 'listening…');
+    }
+  };
+
+  rec.onspeechstart = () => {
+    // Barge-in: if the assistant is currently talking, cut it off.
+    if (state === State.SPEAKING) {
+      interrupt();
+      setState(State.LISTENING, 'listening… (interrupted)');
+    }
+  };
+
+  rec.onresult = (ev) => {
+    let interim = '';
+    let finalText = '';
+    for (let i = ev.resultIndex; i < ev.results.length; i++) {
+      const res = ev.results[i];
+      if (res.isFinal) finalText += res[0].transcript;
+      else interim += res[0].transcript;
+    }
+    if (interim) showInterim(interim);
+    if (finalText.trim()) {
+      clearInterim();
+      stopRecognition();
+      handleUserTurn(finalText.trim()).catch((e) => console.error(e));
+    }
+  };
+
+  rec.onerror = (ev) => {
+    // `no-speech` and `aborted` are noisy/expected; ignore them silently.
+    if (ev.error === 'no-speech' || ev.error === 'aborted') return;
+    console.warn('recognition error', ev.error);
+    showBanner(`Speech recognition error: ${ev.error}`);
+  };
+
+  rec.onend = () => {
+    // Auto-restart while we're still in listening mode so the user
+    // can keep talking without pressing anything.
+    if (running && state === State.LISTENING) {
+      try { rec.start(); }
+      catch (_) { /* start() throws if already started */ }
+    }
+  };
+
+  return rec;
+}
+
+function startRecognition() {
+  if (!recognition) recognition = buildRecognition();
+  if (!recognition) return;
+  try { recognition.start(); }
+  catch (_) { /* already started */ }
+}
+
+// Re-create the recognizer when the language changes so the new lang takes
+// effect on the next start, and snap the voice picker to a matching voice.
+el.lang.addEventListener('change', () => {
+  if (recognition) {
+    try { recognition.abort(); } catch (_) {}
+    recognition = null;
+  }
+  syncVoiceToLanguage();
 });
 
-cancelBtn.addEventListener('click', () => {
-  if (!ws || ws.readyState !== WebSocket.OPEN) return;
-  ws.send(JSON.stringify({ type: 'cancel' }));
-  setStatus('busy', 'cancelling…');
+function stopRecognition() {
+  if (!recognition) return;
+  try { recognition.stop(); }
+  catch (_) { /* not started */ }
+}
+
+// ---------------------------------------------------------------------------
+// Start / Stop
+// ---------------------------------------------------------------------------
+
+el.startBtn.addEventListener('click', () => {
+  if (running) return;
+  running = true;
+  hideBanner();
+  ensureAudioCtx(); // unlock Web Audio via user gesture
+  el.startBtn.disabled = true;
+  el.stopBtn.disabled = false;
+  setState(State.LISTENING, 'listening…');
+  startRecognition();
 });
+
+el.stopBtn.addEventListener('click', () => {
+  running = false;
+  interrupt();
+  stopRecognition();
+  recognition = null;
+  clearInterim();
+  el.startBtn.disabled = false;
+  el.stopBtn.disabled = true;
+  setState(State.IDLE, 'idle');
+});
+
+// ---------------------------------------------------------------------------
+// Init
+// ---------------------------------------------------------------------------
 
 loadVoices();
+if (!(window.SpeechRecognition || window.webkitSpeechRecognition)) {
+  showBanner('SpeechRecognition API not supported in this browser (try Chrome).');
+  el.startBtn.disabled = true;
+}
 </script>
 </body>
 </html>

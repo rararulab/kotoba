@@ -232,6 +232,12 @@ async fn demo_returns_html_page() {
     let body = resp.text().await.expect("html body");
     assert!(body.contains("<title>kotoba TTS"));
     assert!(body.contains("/ws/tts"));
+    // Voice chat demo markers: the page advertises itself as a voice
+    // chat experience, uses the browser SpeechRecognition API, and
+    // calls an OpenAI-compatible chat completions endpoint.
+    assert!(body.contains("voice chat"));
+    assert!(body.contains("SpeechRecognition"));
+    assert!(body.contains("chat/completions"));
 }
 
 // ---------------------------------------------------------------------------

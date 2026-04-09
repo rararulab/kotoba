@@ -31,3 +31,4 @@ lcov.info
 tarpaulin-report.html
 hubert_base.pt
 rmvpe.pt
+.gstack/
