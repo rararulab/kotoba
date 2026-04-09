@@ -56,6 +56,46 @@ pub struct ApiErrorDetail {
     pub code:       u16,
 }
 
+/// Incoming WebSocket TTS request payload.
+#[derive(Debug, Deserialize)]
+pub struct WsTtsRequest {
+    /// Text to synthesize into speech.
+    pub text:  String,
+    /// Voice identifier (same format as `SpeechRequest.voice`).
+    pub voice: String,
+    /// Speech speed multiplier. Defaults to 1.0 when absent.
+    pub speed: Option<f64>,
+}
+
+/// WebSocket response message sent after successful synthesis or on error.
+#[derive(Debug, Serialize)]
+pub struct WsResponse {
+    /// Message type: `"done"` or `"error"`.
+    #[serde(rename = "type")]
+    pub msg_type: String,
+    /// Error message (only present when `msg_type` is `"error"`).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub message:  Option<String>,
+}
+
+impl WsResponse {
+    /// Create a `{"type": "done"}` response.
+    pub fn done() -> Self {
+        Self {
+            msg_type: "done".to_string(),
+            message:  None,
+        }
+    }
+
+    /// Create a `{"type": "error", "message": "..."}` response.
+    pub fn error(message: impl Into<String>) -> Self {
+        Self {
+            msg_type: "error".to_string(),
+            message:  Some(message.into()),
+        }
+    }
+}
+
 impl ApiError {
     /// Create a bad-request (400) error response.
     pub fn bad_request(message: impl Into<String>) -> Self {

@@ -1,9 +1,10 @@
 //! OpenAI-compatible TTS API server.
 //!
-//! Exposes three endpoints:
+//! Exposes four endpoints:
 //! - `POST /v1/audio/speech` — synthesize speech from text
 //! - `GET /v1/voices` — list available voices
 //! - `GET /health` — health check
+//! - `WS /ws/tts` — streaming TTS over WebSocket
 
 mod handlers;
 mod models;
@@ -30,6 +31,7 @@ pub async fn run(host: &str, port: u16) -> crate::error::Result<()> {
         .route("/health", get(handlers::health))
         .route("/v1/voices", get(handlers::list_voices))
         .route("/v1/audio/speech", post(handlers::speech))
+        .route("/ws/tts", get(handlers::ws_tts))
         .layer(CorsLayer::permissive())
         .layer(TraceLayer::new_for_http())
         .with_state(state);
@@ -42,6 +44,7 @@ pub async fn run(host: &str, port: u16) -> crate::error::Result<()> {
     eprintln!("kotoba serve listening on http://{addr}");
     eprintln!("  POST /v1/audio/speech");
     eprintln!("  GET  /v1/voices");
+    eprintln!("  WS   /ws/tts");
     eprintln!("  GET  /health");
 
     axum::serve(listener, app).await.context(error::IoSnafu)?;
