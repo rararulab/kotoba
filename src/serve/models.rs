@@ -107,7 +107,7 @@ impl WsClientMessage {
 }
 
 /// WebSocket response message sent during streaming synthesis or on error.
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct WsResponse {
     /// Message type: `"chunk"`, `"done"`, `"cancelled"`, or `"error"`.
     #[serde(rename = "type")]

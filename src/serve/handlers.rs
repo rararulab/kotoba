@@ -2,6 +2,7 @@
 
 use std::{path::Path, sync::Arc, time::Duration};
 
+use async_trait::async_trait;
 use axum::{
     Json,
     extract::{
@@ -17,11 +18,50 @@ use super::models::{
 };
 use crate::tts::{KokoroBackend, TtsBackend, VitsBackend, VoicevoxBackend};
 
+/// Factory for creating TTS backends from a resolved voice target.
+#[async_trait]
+pub trait BackendFactory: Send + Sync {
+    /// Create a TTS backend for the given backend name, speaker, and speed.
+    fn create(
+        &self,
+        backend: &str,
+        speaker: &str,
+        speed: f32,
+        config: &crate::app_config::AppConfig,
+    ) -> Result<Box<dyn TtsBackend>, String>;
+}
+
+/// Default factory that instantiates real TTS backends (Kokoro, VOICEVOX,
+/// VITS).
+pub struct DefaultBackendFactory;
+
+impl BackendFactory for DefaultBackendFactory {
+    fn create(
+        &self,
+        backend: &str,
+        speaker: &str,
+        speed: f32,
+        config: &crate::app_config::AppConfig,
+    ) -> Result<Box<dyn TtsBackend>, String> {
+        match backend {
+            "kokoro" => Ok(Box::new(KokoroBackend::new(speaker.to_string(), speed))),
+            "voicevox" => {
+                let url = config.voicevox.url.clone();
+                Ok(Box::new(VoicevoxBackend::new(url, speaker.to_string())))
+            }
+            "vits" => Ok(Box::new(VitsBackend::new(speaker.to_string()))),
+            other => Err(format!("unknown backend: {other}")),
+        }
+    }
+}
+
 /// Shared server state passed to handlers via axum's `State` extractor.
 #[derive(Clone)]
 pub struct AppState {
     /// Application configuration snapshot taken at server start.
-    pub config: Arc<crate::app_config::AppConfig>,
+    pub config:  Arc<crate::app_config::AppConfig>,
+    /// Factory for creating TTS backends.
+    pub factory: Arc<dyn BackendFactory>,
 }
 
 /// `GET /health` — returns a simple health-check response.
@@ -152,20 +192,10 @@ pub async fn speech(
     })?;
     let tts_output = tmp_dir.path().join("speech.wav");
 
-    let backend: Box<dyn TtsBackend> = match backend_name.as_str() {
-        "kokoro" => Box::new(KokoroBackend::new(speaker_id.clone(), speed)),
-        "voicevox" => {
-            let url = state.config.voicevox.url.clone();
-            Box::new(VoicevoxBackend::new(url, speaker_id.clone()))
-        }
-        "vits" => Box::new(VitsBackend::new(speaker_id.clone())),
-        other => {
-            return Err((
-                StatusCode::BAD_REQUEST,
-                Json(ApiError::bad_request(format!("unknown backend: {other}"))),
-            ));
-        }
-    };
+    let backend = state
+        .factory
+        .create(&backend_name, &speaker_id, speed, &state.config)
+        .map_err(|e| (StatusCode::BAD_REQUEST, Json(ApiError::bad_request(e))))?;
 
     backend
         .synthesize(&req.input, &tts_output)
@@ -351,10 +381,12 @@ async fn handle_ws_tts(mut socket: WebSocket, state: AppState) {
 
 /// Split text into sentences on Japanese sentence boundaries.
 ///
+/// Visible to sibling modules for testing.
+///
 /// Splits on `。`, `！`, `？`, `！`, `？`, and `\n`, keeping the delimiter
 /// attached to the preceding sentence.  Empty chunks are filtered out.
 /// If no delimiters are found, returns the whole text as a single chunk.
-fn split_sentences(text: &str) -> Vec<String> {
+pub(super) fn split_sentences(text: &str) -> Vec<String> {
     let mut sentences = Vec::new();
     let mut current = String::new();
 
@@ -434,16 +466,12 @@ async fn process_ws_tts_request(
         };
         let tts_output = tmp_dir.path().join("speech.wav");
 
-        let backend: Box<dyn TtsBackend> = match backend_name.as_str() {
-            "kokoro" => Box::new(KokoroBackend::new(speaker_id.clone(), speed)),
-            "voicevox" => {
-                let url = state.config.voicevox.url.clone();
-                Box::new(VoicevoxBackend::new(url, speaker_id.clone()))
-            }
-            "vits" => Box::new(VitsBackend::new(speaker_id.clone())),
-            other => {
-                return send_ws_error(socket, format!("unknown backend: {other}")).await;
-            }
+        let backend = match state
+            .factory
+            .create(&backend_name, &speaker_id, speed, &state.config)
+        {
+            Ok(b) => b,
+            Err(e) => return send_ws_error(socket, e).await,
         };
 
         if let Err(e) = backend.synthesize(sentence, &tts_output).await {
