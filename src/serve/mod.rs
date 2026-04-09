@@ -1,16 +1,20 @@
 //! OpenAI-compatible TTS API server.
 //!
-//! Exposes five endpoints:
+//! Exposes seven endpoints:
 //! - `POST /v1/audio/speech` — synthesize speech from text
 //! - `GET /v1/voices` — list available voices
 //! - `GET /health` — health check
 //! - `WS /ws/tts` — streaming TTS over WebSocket
-//! - `GET /demo` — bundled web demo for the streaming TTS endpoint
+//! - `WS /ws/voice` — real-time voice conversation pipeline
+//! - `GET /static/pcm-recorder-worklet.js` — `AudioWorklet` processor for PCM
+//!   recording
+//! - `GET /demo` — bundled web demo for real-time voice conversation
 
 mod handlers;
 mod models;
 #[cfg(test)]
 mod tests;
+mod voice;
 
 use std::sync::Arc;
 
@@ -34,6 +38,11 @@ pub fn build_router(state: AppState) -> Router {
         .route("/v1/voices", get(handlers::list_voices))
         .route("/v1/audio/speech", post(handlers::speech))
         .route("/ws/tts", get(handlers::ws_tts))
+        .route("/ws/voice", get(handlers::voice_ws))
+        .route(
+            "/static/pcm-recorder-worklet.js",
+            get(handlers::pcm_worklet),
+        )
         .route("/demo", get(handlers::demo))
         .layer(CorsLayer::permissive())
         .layer(TraceLayer::new_for_http())
@@ -60,6 +69,7 @@ pub async fn run(host: &str, port: u16) -> crate::error::Result<()> {
     eprintln!("  POST /v1/audio/speech");
     eprintln!("  GET  /v1/voices");
     eprintln!("  WS   /ws/tts");
+    eprintln!("  WS   /ws/voice");
     eprintln!("  GET  /health");
     eprintln!("  GET  /demo  →  http://{addr}/demo");
 
