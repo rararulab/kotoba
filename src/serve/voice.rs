@@ -88,9 +88,10 @@ enum ServerMessage {
 /// Configuration passed as query parameters on the WebSocket URL.
 #[derive(Debug, Clone, Deserialize)]
 pub struct VoiceParams {
-    /// Whisper-compatible ASR endpoint URL.
-    #[serde(default = "default_asr_url")]
-    pub asr_url:       String,
+    /// Whisper-compatible ASR endpoint URL (filled from managed process when
+    /// absent).
+    #[serde(default)]
+    pub asr_url:       Option<String>,
     /// OpenAI-compatible LLM endpoint base URL.
     #[serde(default = "default_llm_url")]
     pub llm_url:       String,
@@ -108,7 +109,8 @@ pub struct VoiceParams {
     pub system_prompt: String,
 }
 
-fn default_asr_url() -> String { "http://localhost:8000/v1/audio/transcriptions".to_string() }
+/// Fallback ASR URL used when no managed Whisper process is available.
+const FALLBACK_ASR_URL: &str = "http://localhost:8000/v1/audio/transcriptions";
 
 fn default_llm_url() -> String { "http://localhost:11434/v1".to_string() }
 
@@ -655,7 +657,8 @@ async fn process_utterance(
     .await;
 
     // 1. ASR
-    let transcript = transcribe(client, &params.asr_url, audio, INPUT_SAMPLE_RATE).await?;
+    let asr_url = params.asr_url.as_deref().unwrap_or(FALLBACK_ASR_URL);
+    let transcript = transcribe(client, asr_url, audio, INPUT_SAMPLE_RATE).await?;
 
     if transcript.is_empty() {
         return Err("empty transcript".to_string());

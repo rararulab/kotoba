@@ -85,6 +85,7 @@ async fn test_server() -> String {
     let state = AppState {
         config:  Arc::new(AppConfig::default()),
         factory: Arc::new(StubBackendFactory),
+        asr_url: Arc::new("http://localhost:8000/v1/audio/transcriptions".to_string()),
     };
     let app = super::build_router(state);
     let listener = TcpListener::bind("127.0.0.1:0")

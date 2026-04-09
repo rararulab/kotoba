@@ -10,6 +10,7 @@
 //!   recording
 //! - `GET /demo` — bundled web demo for real-time voice conversation
 
+mod asr;
 mod handlers;
 mod models;
 #[cfg(test)]
@@ -51,11 +52,31 @@ pub fn build_router(state: AppState) -> Router {
 
 /// Start the HTTP server and listen for requests.
 pub async fn run(host: &str, port: u16) -> crate::error::Result<()> {
+    // Start managed Whisper ASR server.
+    eprintln!("Starting Whisper ASR server...");
+    let mut whisper = match asr::WhisperProcess::start().await {
+        Ok(w) => {
+            eprintln!("  Whisper ASR: {}", w.url());
+            Some(w)
+        }
+        Err(e) => {
+            eprintln!("  WARNING: Failed to start Whisper ASR: {e}");
+            eprintln!("  Voice pipeline will use external ASR endpoint");
+            None
+        }
+    };
+
+    let asr_url = whisper.as_ref().map_or_else(
+        || "http://localhost:8000/v1/audio/transcriptions".to_string(),
+        asr::WhisperProcess::url,
+    );
+
     let config = Arc::new(crate::app_config::load().clone());
 
     let state = AppState {
         config,
         factory: Arc::new(DefaultBackendFactory),
+        asr_url: Arc::new(asr_url),
     };
 
     let app = build_router(state);
@@ -74,6 +95,11 @@ pub async fn run(host: &str, port: u16) -> crate::error::Result<()> {
     eprintln!("  GET  /demo  →  http://{addr}/demo");
 
     axum::serve(listener, app).await.context(error::IoSnafu)?;
+
+    // Cleanup on exit.
+    if let Some(ref mut w) = whisper {
+        w.shutdown().await;
+    }
 
     Ok(())
 }
