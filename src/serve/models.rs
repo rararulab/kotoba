@@ -56,7 +56,8 @@ pub struct ApiErrorDetail {
     pub code:       u16,
 }
 
-/// Incoming WebSocket TTS request payload.
+/// Incoming WebSocket TTS request payload (untagged, for backwards
+/// compatibility).
 #[derive(Debug, Deserialize)]
 pub struct WsTtsRequest {
     /// Text to synthesize into speech.
@@ -67,22 +68,88 @@ pub struct WsTtsRequest {
     pub speed: Option<f64>,
 }
 
-/// WebSocket response message sent after successful synthesis or on error.
-#[derive(Debug, Serialize)]
+/// Tagged client message received over the WebSocket.
+///
+/// Supports both the tagged `{"type": "tts", ...}` format and the legacy
+/// untagged `WsTtsRequest` format via [`WsClientMessage::parse`].
+#[derive(Debug, Deserialize)]
+#[serde(tag = "type")]
+pub enum WsClientMessage {
+    /// A TTS synthesis request.
+    #[serde(rename = "tts")]
+    Tts {
+        /// Text to synthesize into speech.
+        text:  String,
+        /// Voice identifier (same format as `SpeechRequest.voice`).
+        voice: String,
+        /// Speech speed multiplier. Defaults to 1.0 when absent.
+        speed: Option<f64>,
+    },
+    /// Cancel the in-progress synthesis.
+    #[serde(rename = "cancel")]
+    Cancel,
+}
+
+impl WsClientMessage {
+    /// Parse a JSON string as a client message.
+    ///
+    /// Tries the tagged `WsClientMessage` format first, then falls back to the
+    /// untagged `WsTtsRequest` for backwards compatibility.
+    pub fn parse(text: &str) -> Result<Self, serde_json::Error> {
+        serde_json::from_str::<Self>(text).or_else(|_| {
+            serde_json::from_str::<WsTtsRequest>(text).map(|r| Self::Tts {
+                text:  r.text,
+                voice: r.voice,
+                speed: r.speed,
+            })
+        })
+    }
+}
+
+/// WebSocket response message sent during streaming synthesis or on error.
+#[derive(Debug, Serialize, Deserialize)]
 pub struct WsResponse {
-    /// Message type: `"done"` or `"error"`.
+    /// Message type: `"chunk"`, `"done"`, `"cancelled"`, or `"error"`.
     #[serde(rename = "type")]
     pub msg_type: String,
+    /// Chunk index (only present when `msg_type` is `"chunk"`).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub index:    Option<usize>,
+    /// Total chunk count (only present when `msg_type` is `"done"`).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub chunks:   Option<usize>,
     /// Error message (only present when `msg_type` is `"error"`).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub message:  Option<String>,
 }
 
 impl WsResponse {
-    /// Create a `{"type": "done"}` response.
-    pub fn done() -> Self {
+    /// Create a `{"type": "chunk", "index": N}` response.
+    pub fn chunk(index: usize) -> Self {
+        Self {
+            msg_type: "chunk".to_string(),
+            index:    Some(index),
+            chunks:   None,
+            message:  None,
+        }
+    }
+
+    /// Create a `{"type": "done", "chunks": N}` response.
+    pub fn done(chunks: usize) -> Self {
         Self {
             msg_type: "done".to_string(),
+            index:    None,
+            chunks:   Some(chunks),
+            message:  None,
+        }
+    }
+
+    /// Create a `{"type": "cancelled"}` response.
+    pub fn cancelled() -> Self {
+        Self {
+            msg_type: "cancelled".to_string(),
+            index:    None,
+            chunks:   None,
             message:  None,
         }
     }
@@ -91,6 +158,8 @@ impl WsResponse {
     pub fn error(message: impl Into<String>) -> Self {
         Self {
             msg_type: "error".to_string(),
+            index:    None,
+            chunks:   None,
             message:  Some(message.into()),
         }
     }
