@@ -7,6 +7,7 @@ pub(crate) mod kokoro;
 mod paths;
 mod romaji;
 mod rvc;
+mod serve;
 mod srs;
 mod store;
 mod tts;
@@ -38,6 +39,12 @@ async fn main() {
 async fn run() -> std::result::Result<(), Box<dyn std::error::Error>> {
     let cli = Cli::parse();
     let db = db::Database::open_default().await?;
+
+    // Serve does not require the database
+    if let Command::Serve { host, port } = cli.command {
+        serve::run(&host, port).await?;
+        return Ok(());
+    }
 
     // Ensure DB is initialized for all commands except Init and Setup
     if !matches!(cli.command, Command::Init | Command::Setup) {
@@ -283,6 +290,7 @@ async fn run() -> std::result::Result<(), Box<dyn std::error::Error>> {
         Command::Export { format, grammar } => {
             cli::export::export(&db, &format, grammar).await?;
         }
+        Command::Serve { .. } => unreachable!("handled before DB initialization"),
     }
 
     Ok(())

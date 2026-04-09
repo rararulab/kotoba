@@ -90,19 +90,43 @@ pub async fn play_word(word: &str, enable: bool, style: PlayStyle) -> Result<Pat
 
     let cache = crate::paths::audio_cache_dir();
     std::fs::create_dir_all(&cache).context(error::IoSnafu)?;
-
+    let rvc_model_cfg = cfg.rvc.model.trim().to_string();
+    let rvc_model = if rvc_model_cfg.is_empty() {
+        None
+    } else {
+        Some(rvc_model_cfg)
+    };
+    let rvc_enabled = rvc_model.is_some();
+    let cache_variant = build_cache_variant(
+        style,
+        base_speed,
+        rvc_model.as_deref(),
+        rvc_pitch,
+        &rvc_pitch_algo,
+        rvc_index_influence,
+    );
     let file = cache.join(build_cache_filename(
         word,
         &config.backend,
         &config.speaker_id,
+        &cache_variant,
     ));
 
     if file.exists() {
         match validate_generated_audio(&file) {
-            Ok(()) => eprintln!("overwriting existing audio: {}", file.display()),
-            Err(err) => eprintln!("existing audio invalid, regenerating: {err}"),
+            Ok(()) => {
+                if enable {
+                    eprintln!("playing (cache hit): {}", file.display());
+                    play_audio_now(&file)?;
+                }
+                eprintln!("cache hit: {}", file.display());
+                return Ok(file);
+            }
+            Err(err) => {
+                eprintln!("existing cached audio invalid, regenerating: {err}");
+                let _ = std::fs::remove_file(&file);
+            }
         }
-        let _ = std::fs::remove_file(&file);
     }
 
     eprintln!("synthesizing: {word}...");
@@ -128,13 +152,6 @@ pub async fn play_word(word: &str, enable: bool, style: PlayStyle) -> Result<Pat
     } else {
         String::new()
     };
-    let rvc_model_cfg = cfg.rvc.model.trim().to_string();
-    let rvc_model = if rvc_model_cfg.is_empty() {
-        None
-    } else {
-        Some(rvc_model_cfg)
-    };
-    let rvc_enabled = rvc_model.is_some();
 
     let backend_label = match config.backend.as_str() {
         "voicevox" => "voicevox",
@@ -300,13 +317,31 @@ fn split_text_for_tts(text: &str, max_chars: usize) -> Vec<String> {
     chunks
 }
 
-fn build_cache_filename(text: &str, backend: &str, speaker: &str) -> String {
+const CACHE_SCHEMA_VERSION: &str = "v2";
+
+fn build_cache_variant(
+    style: PlayStyle,
+    base_speed: f32,
+    rvc_model: Option<&str>,
+    rvc_pitch: i32,
+    rvc_pitch_algo: &str,
+    rvc_index_influence: f32,
+) -> String {
+    format!(
+        "schema={CACHE_SCHEMA_VERSION}|style={style:?}|speed={base_speed:.3}|rvc_model={}|rvc_pitch={rvc_pitch}|rvc_algo={rvc_pitch_algo}|rvc_index={rvc_index_influence:.3}",
+        rvc_model.unwrap_or("none")
+    )
+}
+
+fn build_cache_filename(text: &str, backend: &str, speaker: &str, variant: &str) -> String {
     let mut hasher = Sha256::new();
     hasher.update(text.as_bytes());
     hasher.update(b"|");
     hasher.update(backend.as_bytes());
     hasher.update(b"|");
     hasher.update(speaker.as_bytes());
+    hasher.update(b"|");
+    hasher.update(variant.as_bytes());
     let digest = hasher.finalize();
 
     let mut hash_hex = String::with_capacity(24);
@@ -1097,8 +1132,16 @@ mod tests {
     #[test]
     fn cache_filename_is_short_and_stable_for_long_text() {
         let long_text = "あ".repeat(400);
-        let name1 = build_cache_filename(&long_text, "kokoro", "jf_alpha");
-        let name2 = build_cache_filename(&long_text, "kokoro", "jf_alpha");
+        let variant = build_cache_variant(
+            PlayStyle::Character,
+            1.0,
+            Some("miku-rvc"),
+            0,
+            "rmvpe",
+            0.66,
+        );
+        let name1 = build_cache_filename(&long_text, "kokoro", "jf_alpha", &variant);
+        let name2 = build_cache_filename(&long_text, "kokoro", "jf_alpha", &variant);
 
         assert_eq!(name1, name2, "filename hash should be stable");
         assert!(
@@ -1113,6 +1156,17 @@ mod tests {
         assert!(
             !name1.contains(&long_text),
             "long raw text should not be embedded directly in file name"
+        );
+    }
+
+    #[test]
+    fn cache_filename_changes_when_variant_changes() {
+        let text = "こんにちは";
+        let base = build_cache_filename(text, "kokoro", "jf_alpha", "schema=v2|style=Character");
+        let changed = build_cache_filename(text, "kokoro", "jf_alpha", "schema=v2|style=Neutral");
+        assert_ne!(
+            base, changed,
+            "cache key variant should invalidate old audio when params change"
         );
     }
 

@@ -73,6 +73,9 @@ pub enum KotobaError {
     ))]
     WordLookup { word: String, message: String },
 
+    #[snafu(display("server error: {message}"))]
+    Server { message: String },
+
     #[snafu(display("generated audio is invalid at {path}: {message}"))]
     AudioInvalid { path: String, message: String },
 

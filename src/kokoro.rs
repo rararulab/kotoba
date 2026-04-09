@@ -3,8 +3,10 @@
 //! Pipeline: text → phoneme tokens → ONNX model inference → WAV file.
 
 use std::{
+    collections::HashMap,
     path::{Path, PathBuf},
     process::Command,
+    sync::{Mutex, OnceLock},
 };
 
 use ndarray::{Array1, Array2, Array3, Axis};
@@ -180,6 +182,12 @@ tokens = tokenizer.tokenize(phonemes)
 print(json.dumps(tokens))
 "#;
 
+static KOKORO_SESSION: OnceLock<Mutex<Session>> = OnceLock::new();
+static VOICES_BIN_CACHE: OnceLock<Vec<u8>> = OnceLock::new();
+type StyleCacheKey = (String, usize);
+type StyleVectorCache = HashMap<StyleCacheKey, Vec<f32>>;
+static STYLE_VECTOR_CACHE: OnceLock<Mutex<StyleVectorCache>> = OnceLock::new();
+
 fn tokenize_with_kokoro_python(text: &str, lang: &str) -> std::result::Result<Vec<i64>, String> {
     if lang == "ja" {
         if let Ok(tokens) = run_uv_tokenizer(text, lang) {
@@ -257,6 +265,39 @@ fn parse_tokenizer_output(output: &std::process::Output) -> std::result::Result<
 /// (`~/.kotoba/models/kokoro`).
 fn models_dir() -> PathBuf { crate::paths::models_dir().join("kokoro") }
 
+fn cached_session(model_path: &Path) -> Result<&'static Mutex<Session>> {
+    if let Some(session) = KOKORO_SESSION.get() {
+        return Ok(session);
+    }
+
+    let session = Session::builder()
+        .context(OnnxRuntimeSnafu)?
+        .commit_from_file(model_path)
+        .context(OnnxRuntimeSnafu)?;
+    let _ = KOKORO_SESSION.set(Mutex::new(session));
+    Ok(KOKORO_SESSION
+        .get()
+        .expect("kokoro session should be initialized"))
+}
+
+fn voices_bin_bytes() -> Result<&'static [u8]> {
+    if let Some(bytes) = VOICES_BIN_CACHE.get() {
+        return Ok(bytes.as_slice());
+    }
+
+    let path = models_dir().join("voices-v1.0.bin");
+    let bytes = std::fs::read(&path).context(IoSnafu)?;
+    let _ = VOICES_BIN_CACHE.set(bytes);
+    Ok(VOICES_BIN_CACHE
+        .get()
+        .expect("voices cache should be initialized")
+        .as_slice())
+}
+
+fn style_vector_cache() -> &'static Mutex<StyleVectorCache> {
+    STYLE_VECTOR_CACHE.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
 /// Synthesize speech from text using the local Kokoro ONNX model.
 ///
 /// Loads the model from `~/.kotoba/models/kokoro/kokoro-v1.0.onnx`,
@@ -305,9 +346,23 @@ const STYLE_DIM: usize = 256;
 /// The file is a raw little-endian f32 array of shape `[N, 1, 256]`.
 /// The style vector is selected by token length (before BOS/EOS padding).
 fn load_style_vector(voice: &str, token_len: usize) -> Result<Vec<f32>> {
-    let voices_path = models_dir().join("voices-v1.0.bin");
-    let data = std::fs::read(&voices_path).context(IoSnafu)?;
-    extract_style_from_npz(&data, voice, token_len)
+    let cache_key = (voice.to_string(), token_len);
+    let cached_style = {
+        let cache = style_vector_cache()
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        cache.get(&cache_key).cloned()
+    };
+    if let Some(style) = cached_style {
+        return Ok(style);
+    }
+
+    let style = extract_style_from_npz(voices_bin_bytes()?, voice, token_len)?;
+    style_vector_cache()
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .insert(cache_key, style.clone());
+    Ok(style)
 }
 
 fn extract_style_from_npz(data: &[u8], voice: &str, token_len: usize) -> Result<Vec<f32>> {
@@ -359,6 +414,7 @@ fn read_style_array_2d(data: &[u8], voice: &str) -> std::result::Result<Array2<f
 ///
 /// Creates input tensors (`input_ids`, `style`, `speed`), runs the model,
 /// and writes the output audio to a WAV file.
+#[allow(clippy::significant_drop_tightening)] // ort outputs borrow session internals
 fn run_inference(
     model_path: &Path,
     tokens: &[i64],
@@ -370,45 +426,48 @@ fn run_inference(
     let inner_token_len = tokens.len().saturating_sub(2);
     let style_data = load_style_vector(voice, inner_token_len)?;
 
-    let mut session = Session::builder()
-        .context(OnnxRuntimeSnafu)?
-        .commit_from_file(model_path)
-        .context(OnnxRuntimeSnafu)?;
+    let session_handle = cached_session(model_path)?;
+    let audio_data: Vec<f32> = {
+        let mut session = session_handle
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
 
-    let seq_len = tokens.len();
-    let ids_array = Array2::from_shape_vec((1, seq_len), tokens.to_vec())
-        .expect("token shape must match array dimensions");
-    let ids_tensor = TensorRef::from_array_view(&ids_array).context(OnnxRuntimeSnafu)?;
+        let seq_len = tokens.len();
+        let ids_array = Array2::from_shape_vec((1, seq_len), tokens.to_vec())
+            .expect("token shape must match array dimensions");
+        let ids_tensor = TensorRef::from_array_view(&ids_array).context(OnnxRuntimeSnafu)?;
 
-    let style_array = Array2::from_shape_vec((1, STYLE_DIM), style_data)
-        .expect("style shape must match array dimensions");
-    let style_tensor = TensorRef::from_array_view(&style_array).context(OnnxRuntimeSnafu)?;
+        let style_array = Array2::from_shape_vec((1, STYLE_DIM), style_data)
+            .expect("style shape must match array dimensions");
+        let style_tensor = TensorRef::from_array_view(&style_array).context(OnnxRuntimeSnafu)?;
 
-    let speed_data = Array1::from_vec(vec![speed]);
-    let speed_tensor = TensorRef::from_array_view(&speed_data).context(OnnxRuntimeSnafu)?;
+        let speed_data = Array1::from_vec(vec![speed]);
+        let speed_tensor = TensorRef::from_array_view(&speed_data).context(OnnxRuntimeSnafu)?;
 
-    // The model accepts both "tokens"/"input_ids" naming conventions.
-    // Detect which one by checking the session's input names.
-    let input_name = session
-        .inputs()
-        .iter()
-        .find(|i| i.name() == "input_ids")
-        .map_or("tokens", |_| "input_ids");
+        // The model accepts both "tokens"/"input_ids" naming conventions.
+        // Detect which one by checking the session's input names.
+        let input_name = session
+            .inputs()
+            .iter()
+            .find(|i| i.name() == "input_ids")
+            .map_or("tokens", |_| "input_ids");
 
-    let outputs = session
-        .run(inputs![
-            input_name => ids_tensor,
-            "style" => style_tensor,
-            "speed" => speed_tensor
-        ])
-        .context(OnnxRuntimeSnafu)?;
+        let outputs = session
+            .run(inputs![
+                input_name => ids_tensor,
+                "style" => style_tensor,
+                "speed" => speed_tensor
+            ])
+            .context(OnnxRuntimeSnafu)?;
 
-    let audio_tensor = &outputs[0];
-    let (_, audio_data) = audio_tensor
-        .try_extract_tensor::<f32>()
-        .context(OnnxRuntimeSnafu)?;
+        let audio_tensor = &outputs[0];
+        let (_, audio_data) = audio_tensor
+            .try_extract_tensor::<f32>()
+            .context(OnnxRuntimeSnafu)?;
+        audio_data.to_vec()
+    };
 
-    write_wav(output, audio_data, 24000) // Kokoro uses 24 kHz
+    write_wav(output, &audio_data, 24000) // Kokoro uses 24 kHz
 }
 
 /// Write raw f32 audio samples to a 16-bit PCM WAV file at the given sample
