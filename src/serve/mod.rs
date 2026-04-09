@@ -1,10 +1,11 @@
 //! OpenAI-compatible TTS API server.
 //!
-//! Exposes four endpoints:
+//! Exposes five endpoints:
 //! - `POST /v1/audio/speech` — synthesize speech from text
 //! - `GET /v1/voices` — list available voices
 //! - `GET /health` — health check
 //! - `WS /ws/tts` — streaming TTS over WebSocket
+//! - `GET /demo` — bundled web demo for the streaming TTS endpoint
 
 mod handlers;
 mod models;
@@ -33,6 +34,7 @@ pub fn build_router(state: AppState) -> Router {
         .route("/v1/voices", get(handlers::list_voices))
         .route("/v1/audio/speech", post(handlers::speech))
         .route("/ws/tts", get(handlers::ws_tts))
+        .route("/demo", get(handlers::demo))
         .layer(CorsLayer::permissive())
         .layer(TraceLayer::new_for_http())
         .with_state(state)
@@ -59,6 +61,7 @@ pub async fn run(host: &str, port: u16) -> crate::error::Result<()> {
     eprintln!("  GET  /v1/voices");
     eprintln!("  WS   /ws/tts");
     eprintln!("  GET  /health");
+    eprintln!("  GET  /demo  →  http://{addr}/demo");
 
     axum::serve(listener, app).await.context(error::IoSnafu)?;
 

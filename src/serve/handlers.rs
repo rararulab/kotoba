@@ -67,6 +67,17 @@ pub struct AppState {
 /// `GET /health` — returns a simple health-check response.
 pub async fn health() -> impl IntoResponse { Json(serde_json::json!({"status": "ok"})) }
 
+/// Bundled HTML demo page that exercises the streaming TTS WebSocket.
+const DEMO_HTML: &str = include_str!("demo.html");
+
+/// `GET /demo` — serve the bundled web demo page.
+pub async fn demo() -> impl IntoResponse {
+    (
+        [(header::CONTENT_TYPE, "text/html; charset=utf-8")],
+        DEMO_HTML,
+    )
+}
+
 /// `GET /v1/voices` — list all available voices.
 pub async fn list_voices() -> impl IntoResponse {
     let models_dir = crate::paths::models_dir();
