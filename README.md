@@ -103,6 +103,10 @@ kotoba serve --host 127.0.0.1 --port 3000
 | `WS /ws/tts` | WebSocket | Sentence-level streaming with cancellation |
 | `GET /v1/voices` | HTTP | List available voices |
 | `GET /health` | HTTP | Health check |
+| `GET /demo` | HTTP | Bundled web demo for streaming TTS |
+
+After starting the server, open `http://localhost:3000/demo` in a browser
+to try streaming TTS interactively — no build step or extra hosting required.
 
 ### HTTP batch synthesis
 

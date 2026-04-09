@@ -215,6 +215,25 @@ async fn health_returns_200_and_status_ok() {
     assert_eq!(body["status"], "ok");
 }
 
+#[tokio::test]
+async fn demo_returns_html_page() {
+    let url = test_server().await;
+    let resp = reqwest::get(format!("{url}/demo"))
+        .await
+        .expect("demo request");
+    assert_eq!(resp.status(), 200);
+    let ct = resp
+        .headers()
+        .get("content-type")
+        .expect("content-type header")
+        .to_str()
+        .expect("ascii content-type");
+    assert!(ct.starts_with("text/html"), "got content-type: {ct}");
+    let body = resp.text().await.expect("html body");
+    assert!(body.contains("<title>kotoba TTS"));
+    assert!(body.contains("/ws/tts"));
+}
+
 // ---------------------------------------------------------------------------
 // Feature 2: Voices endpoint
 // ---------------------------------------------------------------------------

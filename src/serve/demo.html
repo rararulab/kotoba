@@ -1,0 +1,251 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>kotoba TTS — streaming demo</title>
+<style>
+  :root {
+    --bg: #0f1115;
+    --panel: #1a1d24;
+    --border: #2a2f3a;
+    --text: #e6e8ec;
+    --muted: #8a8f99;
+    --accent: #7c5cff;
+    --accent-hover: #9277ff;
+    --danger: #ef4444;
+    --success: #10b981;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; background: var(--bg); color: var(--text); font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif; }
+  .container { max-width: 720px; margin: 60px auto; padding: 0 20px; }
+  h1 { font-size: 28px; font-weight: 600; margin: 0 0 8px; letter-spacing: -0.02em; }
+  .subtitle { color: var(--muted); font-size: 14px; margin-bottom: 32px; }
+  .panel { background: var(--panel); border: 1px solid var(--border); border-radius: 12px; padding: 24px; }
+  .row { display: flex; gap: 12px; align-items: center; margin-bottom: 16px; }
+  label { display: block; font-size: 13px; color: var(--muted); margin-bottom: 8px; font-weight: 500; }
+  textarea, select, button {
+    font-family: inherit; font-size: 14px; color: var(--text);
+    background: var(--bg); border: 1px solid var(--border); border-radius: 8px;
+    padding: 12px 14px; outline: none;
+  }
+  textarea { width: 100%; min-height: 100px; resize: vertical; line-height: 1.5; }
+  textarea:focus, select:focus { border-color: var(--accent); }
+  select { width: 100%; cursor: pointer; appearance: none; background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath fill='%238a8f99' d='M6 8L2 4h8z'/%3E%3C/svg%3E"); background-repeat: no-repeat; background-position: right 14px center; padding-right: 36px; }
+  button {
+    cursor: pointer; font-weight: 500; transition: all 0.15s;
+    border: none; padding: 12px 20px;
+  }
+  button.primary { background: var(--accent); color: white; flex: 1; }
+  button.primary:hover:not(:disabled) { background: var(--accent-hover); }
+  button.danger { background: transparent; color: var(--danger); border: 1px solid var(--danger); }
+  button.danger:hover:not(:disabled) { background: rgba(239, 68, 68, 0.1); }
+  button:disabled { opacity: 0.4; cursor: not-allowed; }
+  .status {
+    margin-top: 20px; padding: 16px; background: var(--bg); border-radius: 8px;
+    border: 1px solid var(--border); font-family: ui-monospace, SFMono-Regular, monospace; font-size: 12px;
+    min-height: 60px;
+  }
+  .status-line { display: flex; gap: 8px; align-items: center; margin-bottom: 4px; }
+  .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--muted); }
+  .dot.connected { background: var(--success); }
+  .dot.busy { background: var(--accent); animation: pulse 1s infinite; }
+  .dot.error { background: var(--danger); }
+  @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.4; } }
+  .chunks { display: flex; gap: 4px; margin-top: 12px; flex-wrap: wrap; }
+  .chunk-pill { padding: 4px 10px; background: var(--accent); color: white; border-radius: 4px; font-size: 11px; font-weight: 500; opacity: 0; transform: translateY(4px); animation: pop 0.3s forwards; }
+  @keyframes pop { to { opacity: 1; transform: translateY(0); } }
+  .footer { margin-top: 24px; text-align: center; color: var(--muted); font-size: 12px; }
+  a { color: var(--accent); text-decoration: none; }
+  a:hover { text-decoration: underline; }
+</style>
+</head>
+<body>
+<div class="container">
+  <h1>kotoba TTS</h1>
+  <div class="subtitle">Streaming WebSocket synthesis demo</div>
+
+  <div class="panel">
+    <label for="text">Text</label>
+    <textarea id="text" placeholder="入力してください…">こんにちは、世界！今日はいい天気ですね。お元気ですか？</textarea>
+
+    <div style="margin-top: 16px;">
+      <label for="voice">Voice</label>
+      <select id="voice"></select>
+    </div>
+
+    <div class="row" style="margin-top: 20px; margin-bottom: 0;">
+      <button id="speak" class="primary">Speak</button>
+      <button id="cancel" class="danger" disabled>Cancel</button>
+    </div>
+
+    <div class="status">
+      <div class="status-line">
+        <div class="dot" id="dot"></div>
+        <span id="status-text">idle</span>
+      </div>
+      <div class="chunks" id="chunks"></div>
+    </div>
+  </div>
+
+  <div class="footer">
+    <code>WS /ws/tts</code> · <a href="https://github.com/rararulab/kotoba">github.com/rararulab/kotoba</a>
+  </div>
+</div>
+
+<script>
+const $ = id => document.getElementById(id);
+const dot = $('dot'), statusText = $('status-text'), chunks = $('chunks');
+const speakBtn = $('speak'), cancelBtn = $('cancel');
+const textInput = $('text'), voiceSelect = $('voice');
+
+let ws = null;
+let audioCtx = null;
+let playQueue = [];
+let isPlaying = false;
+let chunkCount = 0;
+
+// Load available voices
+async function loadVoices() {
+  try {
+    const r = await fetch('/v1/voices');
+    const data = await r.json();
+    voiceSelect.innerHTML = '';
+    if (data.voices.length === 0) {
+      voiceSelect.innerHTML = '<option value="kokoro:jf_alpha">kokoro:jf_alpha (default)</option>';
+      return;
+    }
+    for (const v of data.voices) {
+      const opt = document.createElement('option');
+      opt.value = v.id;
+      opt.textContent = `${v.id} — ${v.name}`;
+      voiceSelect.appendChild(opt);
+    }
+  } catch (e) {
+    voiceSelect.innerHTML = '<option value="kokoro:jf_alpha">kokoro:jf_alpha (default)</option>';
+  }
+}
+
+function setStatus(state, text) {
+  dot.className = 'dot ' + state;
+  statusText.textContent = text;
+}
+
+function reset() {
+  chunkCount = 0;
+  chunks.innerHTML = '';
+  playQueue = [];
+  isPlaying = false;
+}
+
+// Decode WAV bytes (simple PCM 16-bit) into AudioBuffer for playback.
+async function decodeAndPlay(bytes) {
+  if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+  try {
+    const buffer = await audioCtx.decodeAudioData(bytes.slice(0));
+    playQueue.push(buffer);
+    if (!isPlaying) playNext();
+  } catch (e) {
+    console.error('decode error', e);
+  }
+}
+
+function playNext() {
+  if (playQueue.length === 0) {
+    isPlaying = false;
+    return;
+  }
+  isPlaying = true;
+  const buffer = playQueue.shift();
+  const src = audioCtx.createBufferSource();
+  src.buffer = buffer;
+  src.connect(audioCtx.destination);
+  src.onended = playNext;
+  src.start();
+}
+
+speakBtn.addEventListener('click', () => {
+  const text = textInput.value.trim();
+  if (!text) return;
+  if (ws) ws.close();
+
+  reset();
+  speakBtn.disabled = true;
+  cancelBtn.disabled = false;
+  setStatus('busy', 'connecting…');
+
+  const proto = location.protocol === 'https:' ? 'wss' : 'ws';
+  ws = new WebSocket(`${proto}://${location.host}/ws/tts`);
+  ws.binaryType = 'arraybuffer';
+
+  ws.addEventListener('open', () => {
+    setStatus('connected', 'synthesizing…');
+    ws.send(JSON.stringify({
+      type: 'tts',
+      text,
+      voice: voiceSelect.value,
+    }));
+  });
+
+  ws.addEventListener('message', async (ev) => {
+    if (ev.data instanceof ArrayBuffer) {
+      // Binary: audio chunk
+      await decodeAndPlay(ev.data);
+    } else {
+      // Text: control message
+      const msg = JSON.parse(ev.data);
+      if (msg.type === 'chunk') {
+        chunkCount++;
+        const pill = document.createElement('div');
+        pill.className = 'chunk-pill';
+        pill.textContent = `#${msg.index}`;
+        chunks.appendChild(pill);
+        setStatus('busy', `chunk ${chunkCount} received…`);
+      } else if (msg.type === 'done') {
+        setStatus('connected', `done — ${msg.chunks} chunks`);
+        speakBtn.disabled = false;
+        cancelBtn.disabled = true;
+        ws.close();
+        ws = null;
+      } else if (msg.type === 'cancelled') {
+        setStatus('connected', 'cancelled');
+        speakBtn.disabled = false;
+        cancelBtn.disabled = true;
+        ws.close();
+        ws = null;
+      } else if (msg.type === 'error') {
+        setStatus('error', `error: ${msg.message}`);
+        speakBtn.disabled = false;
+        cancelBtn.disabled = true;
+        ws.close();
+        ws = null;
+      }
+    }
+  });
+
+  ws.addEventListener('error', () => {
+    setStatus('error', 'connection error');
+    speakBtn.disabled = false;
+    cancelBtn.disabled = true;
+  });
+
+  ws.addEventListener('close', () => {
+    if (speakBtn.disabled) {
+      // Closed mid-synthesis without done/error
+      setStatus('error', 'connection closed');
+      speakBtn.disabled = false;
+      cancelBtn.disabled = true;
+    }
+  });
+});
+
+cancelBtn.addEventListener('click', () => {
+  if (!ws || ws.readyState !== WebSocket.OPEN) return;
+  ws.send(JSON.stringify({ type: 'cancel' }));
+  setStatus('busy', 'cancelling…');
+});
+
+loadVoices();
+</script>
+</body>
+</html>
